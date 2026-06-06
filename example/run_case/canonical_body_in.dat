@@ -1,0 +1,53 @@
+5   2   3   1   F	F   F       ! nbody, nbody_solid, nbody_membrane, nsection, channel_flow, zoneseparate, Prsb_MomentumRef
+1.00    1.001                   ! density_fluid, density_solid
+0.1    0.02                     ! plate thickness, depthOverLength
+____________________________________________________________________________________________________________________________
+3         1                     ! motion_type**, zoneMax
+7789     15571                 ! nPtsBodyMarker, totNumTriElem
+____________________________________________________________________________________________________________________________
+3         1                     ! motion_type**, zoneMax
+9170     18336                 ! nPtsBodyMarker, totNumTriElem
+____________________________________________________________________________________________________________________________
+3         1                     ! motion_type**, zoneMax
+914     1696                 ! nPtsBodyMarker, totNumTriElem
+____________________________________________________________________________________________________________________________
+3         1                     ! motion_type**, zoneMax
+193     352                 ! nPtsBodyMarker, totNumTriElem
+____________________________________________________________________________________________________________________________
+3         1                     ! motion_type**, zoneMax
+650     1216                 ! nPtsBodyMarker, totNumTriElem
+
+
+
+
+
+
+
+
+
+
+!=========================
+*  body type: (1:ellipse; 2: general_cylinder; 3: ellipsoid, 4: unstructured surface)
+** motion_type (0:Stationary, 1:Forced, 2:Flow Induced, 3:Prescribed, 5: Partial F-B Interaction, 
+                6: Full DYNAMICS_COUPLED,
+				7: BIO_DYNAMICS_COUPLED
+                8: BIO_FOLLOWED_DYNAMICS_COUPLED
+                9: DYNAMICS_COUPLED_QUAT)
+
+
+
+example for FBI wings
+____________________________________________________________________________________________________________________________
+14      1
+2393    4608                    ! nPtsBodyMarker, totNumTriElem
+2.0261    1                   ! Natural freq. of spring, Freq. of prsb. motion
+2187    2225    5237            ! root(rigidRef1), tip(rigidRef2), le(rigidRef3), rw
+0       10      0               ! stroke_init, pitch_init, deviation_init
+0.2157  0       0               ! gravity_factor, damping_factor, inertia_factor
+
+
+
+
+
+
+

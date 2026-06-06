@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unstructured Surface Editor</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <header class="app-header">
+        <h1>Surface Editor</h1>
+        <p>Parametric boundary and side-wall surface generator.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Model</h2>
+        <label>
+          Shape
+          <select id="shape">
+            <option value="circle">Circle / 2D cylinder</option>
+            <option value="ellipse">Ellipse</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="naca">NACA 4-digit</option>
+          </select>
+        </label>
+
+        <div class="grid two">
+          <label data-shape="circle">
+            Radius
+            <input id="radius" type="number" step="0.01" value="0.25">
+          </label>
+          <label data-shape="circle ellipse naca">
+            Points
+            <input id="points" type="number" step="1" min="8" value="96">
+          </label>
+          <label data-shape="ellipse">
+            Rx
+            <input id="rx" type="number" step="0.01" value="0.50">
+          </label>
+          <label data-shape="ellipse">
+            Ry
+            <input id="ry" type="number" step="0.01" value="0.20">
+          </label>
+          <label data-shape="rectangle">
+            Width
+            <input id="width" type="number" step="0.01" value="1.00">
+          </label>
+          <label data-shape="rectangle">
+            Height
+            <input id="height" type="number" step="0.01" value="0.50">
+          </label>
+          <label data-shape="naca">
+            NACA
+            <input id="naca" type="text" value="0012" maxlength="4">
+          </label>
+          <label data-shape="naca">
+            Chord
+            <input id="chord" type="number" step="0.01" value="1.00">
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Placement</h2>
+        <div class="grid three">
+          <label>X<input id="centerX" type="number" step="0.01" value="19.2"></label>
+          <label>Y<input id="centerY" type="number" step="0.01" value="10"></label>
+          <label>Z<input id="centerZ" type="number" step="0.01" value="0"></label>
+        </div>
+        <div class="grid three">
+          <label>Rx deg<input id="rotX" type="number" step="1" value="0"></label>
+          <label>Ry deg<input id="rotY" type="number" step="1" value="0"></label>
+          <label>Rz deg<input id="rotZ" type="number" step="1" value="0"></label>
+        </div>
+        <div class="grid two">
+          <label>
+            Plane
+            <select id="plane">
+              <option value="xy">XY</option>
+              <option value="xz">XZ</option>
+              <option value="yz">YZ</option>
+            </select>
+          </label>
+          <label>
+            Scale
+            <input id="scale" type="number" step="0.01" value="1">
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Surface</h2>
+        <label class="toggle">
+          <input id="make3d" type="checkbox">
+          Create thin 3D side-wall surface
+        </label>
+        <label>
+          Thickness
+          <input id="thickness" type="number" step="0.01" value="0.10">
+        </label>
+      </section>
+
+      <section class="panel actions">
+        <h2>Export</h2>
+        <button id="downloadSurface">Download unstruc_surface_in.dat</button>
+        <button id="downloadStl">Download STL</button>
+        <button id="copyCommand">Copy CLI command</button>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="toolbar">
+        <div>
+          <strong id="summaryTitle">Preview</strong>
+          <span id="rendererStatus">Canvas preview</span>
+        </div>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div id="viewer" class="viewer">
+        <canvas id="fallbackCanvas"></canvas>
+      </div>
+      <pre id="commandBox" class="command-box"></pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

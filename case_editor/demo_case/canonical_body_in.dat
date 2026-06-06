@@ -1,0 +1,11 @@
+1   1   0   1   F   F   F       ! nbody, nbody_solid, nbody_membrane, nsection, channel_flow, zoneseparate, Prsb_MomentumRef
+1    1.001                   ! density_fluid, density_solid
+0.1    0.02                     ! plate thickness, depthOverLength
+____________________________________________________________________________________________________________________________
+3         1                      ! motion_type, zoneMax
+96        0                      ! nPtsBodyMarker, totNumTriElem
+
+
+!=========================
+*  body type: (1:ellipse; 2: general_cylinder; 3: ellipsoid, 4: unstructured surface)
+** motion_type (0:Stationary, 1:Forced, 2:Flow Induced, 3:Prescribed)

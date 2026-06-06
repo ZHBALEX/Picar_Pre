@@ -1,0 +1,11 @@
+1               AMR_RESIZE (0 do not resize, 1 use the closest multigrid-able size, 2 use a larger multigrid-able size)
+
+Block ID | Parent Block	| Point_start 	Point_end|AMR_moving
+======================== AMR Layer 1 ===========================================
+1
+1	0	6.47 2.70 2.35		8.67 3.30 3.65		0
+======================== AMR Layer 2 ===========================================
+1
+2	1	6.51 2.85 2.82		8.63 3.15 3.17		0
+
+

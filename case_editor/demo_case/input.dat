@@ -1,0 +1,137 @@
+nread  skipcheck  dryRun  ibkOut    plot3d_on  ibinOut   freeSwim_on odor_on
+1        0           f      f       t            t            f              f
+ndim
+3         1
+nx          ny         nz
+121        81        1
+xgrid_unif  xout
+2        24
+ygrid_unif  yout
+2        20
+zgrid_unif  zout
+2        0
+uinit       vinit      winit     Perturbation
+1        0        0        0.0
+===================================== Boundary conditions =====================================
+-----left boundary ---------
+bcx1        ux1        vx1        wx1      freq_ux1     freq_vx1     freq_wx1   tstart_gust
+1           0.79        0.0        0.0        0.0          0.0          0.0      0
+-----right boundary ---------
+bcx2        ux2        vx2        wx2      freq_ux2     freq_vx2     freq_wx2
+2           0.0        0.0        0.0        0.0          0.0          0.0
+-----bottom boundary ---------
+bcy1        uy1,       vy1,       wy1      freq_uy1     freq_vy1     freq_wy1
+1           0.79        0.0        0.0        0.0          0.0          0.0
+-----top boundary ---------
+bcy2        uy2,       vy2,       wy2      freq_uy2     freq_vy2     freq_wy2
+1           0.79        0.0        0.0        0.0          0.0          0.0
+-----back boundary ---------
+bcz1,       uz1,       vz1,       wz1      freq_uz1     freq_vz1     freq_wz1
+1           0.79        0.0       0.0        0.0          0.0          0.0
+-----front boundary ---------
+bcz2,       uz2,       vz2,       wz2      freq_uz2     freq_vz2     freq_wz2
+1           0.79        0.0        0.0        0.0          0.0          0.0
+========================== Pressure Boundary conditions =====================================
+-----left boundary-------
+pbcx1  pppx1
+2       0.0
+-----right boundary-------
+pbcx2  pppx2
+2       0.0
+-----bottom boundary-------
+pbcy1  pppy1
+2       0.0
+-----top boundary-------
+pbcy2  pppy2
+2       0.0
+-----front boundary-------
+pbcz1  pppz1
+2       0.0
+-----back boundary-------
+pbcz2  pppz2
+2       0.0
+================================= Time step control ===========================================
+no_tsteps,  nmonitor, ndump     nrestart    nstat   nprobe   STATS_SUM   ndump_start    nPeriod(0/N)
+1920         2        30        960        1       24         9600       0          960
+format_dump
+1
+re,         dt
+1000        0.001
+frac_step (0: Non-Van-Kan, 1: Van-Kan)  advection_scheme (1: AB2, 2: CN1, 3: CN2)
+0                                             3
+================================= Moving mesh (Added by G. Liu) ================================
+Moving mesh option  (0: stationary, 1: uniform velocity, 2: prescribed in "grid_vel.dat", 3: moving with the center of mass (for FBI), 4: with CoM in x-direction, 5: with CoM in y-direction, 6: with CoM in z-direction
+0
+Grid velocity (ugrid0, vgrid0 & wgrid0 for move_mesh = 1)
+0.0    0.0    0.0 
+================================= Hybridization ===============================================
+Upwind_Weight  (0.0 = 100% CDS, 1.0 = 100% upwind, 0.875 = QUICK)
+0.0
+============================ Internal boundary ================================================
+internal_boundary_present   (0: No, 1: Yes)  iblank_fast (0: No, 1: Yes)
+1        0
+body_type   (1: general, 2: canonical)
+2
+boundary_formulation (1: SSM, 2: GCM)
+1
+probeLengthNormalized
+2.0
+============================== Advection and diffusion solver =================================
+itermax,    resmax,   omega-adv      ad_solver_type
+100         1.0E-8     1.0           1
+============================= Poisson solver ==================================================
+it_solver_type (1: Line SOR, 2: PETSC, 3: MG)    Red-black
+7                                                  0                                3
+omega
+0.90                3.0             0.001
+iterMaxPoisson,    resMaxPoisson,  iterResPoisson
+200               1.0E-3          5
+============================== Multi-grid Method ==============================================
+Multi-Grid cycle in x, y, z direction respectively(1: V cycle, 2: W cycle, 3: F cycle)
+1    1     1
+Iterations per loop (iterFinest, iterInter, iterCoarest) (iterInter: 0, for linear increment)
+1    1    30
+Want to change the total # of grid levels? (0: No, and other number: Yes)
+0    0    0
+Want to output the convergence history? (0: No, 1: Yes)
+0
+=============================== LES model =====================================================
+turbActive
+0
+turbModel (1:Dynamic Smagorinsky, 2:Dynamic Lagrangian )
+2
+cSmagFix  (Used for initializing DynLagr: 0.0 for Laminar, 0.1 for Turbulent)
+0.10
+filterWidthModel (1:Cube Root Formalism, 2:Geometric Formalism )
+1
+testFilterDir    (DIRX:DIRZ; 0:No test filtering, 1: Test Filtering Active)
+1  0   1
+homogDir         (DIRX:DIRZ; 0:None Homogeneous, 1: Homogeneous)
+0  0   1
+filterWidthRatio (DIRX:DIRZ)
+2.0 2.0 2.0
+turbLargTScale   (1: TSL Based on Strain Magn, 2: JFM Formalism based on 1/8 Power)
+1
+AdditionalOutput                         BinaryOutput
+0                                                0
+Full_coarsening                          cure_pressure_oscillation
+F                                        f
+pressure_osc_velocity					 pressure_osc_pressure
+f										 f
+=============================== Optimization ==================================================
+optimization
+f
+evaluationInterval						errorPermitted
+750										0.05
+
+================================= Comments for MG method ======================================
+1. Iterations per loop
+   iterFinest is used for controling the number of loops at the finest level.
+   iterCoarest is used for controling the number of loops at the coarest level.
+   iterInter is used for other levels. If use value 0, then the number of loops will increase linearly.
+   Tips:  1   1   1 must be used for GCM method. You may use 2 1 30 or 1 1 30 for SSM.
+2. total # of grid levels
+   0 is set by the Code, can work for most cases. Other values will be the user defined levels. You could
+   decide how many level can be chosen at each direction.
+3. Omega
+   1.0 for 2D case, better use 1.5 for 3D case.
