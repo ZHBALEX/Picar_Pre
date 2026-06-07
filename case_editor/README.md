@@ -56,9 +56,11 @@ from case_editor import build_2d_cylinder_case
 
 case = build_2d_cylinder_case(
     case_dir="example/generated_circle2d_case",
-    center=(19.2, 10.0, 0.0),
+    center=(19.2, 10.0, 0.005),
     radius=0.25,
-    points=96,
+    points=600,
+    thickness=0.01,
+    layers=3,
 )
 
 print(case.report())
@@ -73,8 +75,9 @@ config = CaseBuildConfig(
     case_dir="example/my_case",
     surface=SurfaceBuildConfig(
         kind="circle",
-        params={"radius": 0.25, "n": 96},
-        center=(19.2, 10.0, 0.0),
+        params={"radius": 0.25, "n": 600, "layers": 3},
+        center=(19.2, 10.0, 0.005),
+        thickness=0.01,
     ),
     mesh=MeshBuildConfig(nx=121, ny=81, nz=1, xout=24.0, yout=20.0, zout=0.0),
 )
@@ -110,10 +113,10 @@ python case_editor/run_case_editor.py --case-dir my_case init --template example
 The case editor expects `unstruc_surface_in.dat` to exist before canonical body
 sync. Use the unified surface tools for this step.
 
-Boundary-only 2D cylinder:
+Solver-style thin 2D cylinder:
 
 ```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/test_case generate circle --param radius=0.25 --param n=96 --center 19.2 10 0
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/test_case generate circle --param radius=0.25 --param n=600 --param layers=3 --center 19.2 10 0.005 --thickness 0.01
 ```
 
 Thin 3D side-wall cylinder:
@@ -198,8 +201,10 @@ print(case.report())
 - The surface pipeline remains in `geometry/unstructure_surface`.
 - `canonical_body_in.dat` can be generated from only `unstruc_surface_in.dat`;
   no separate canonical body geometry is required.
-- 2D unstructured surfaces are boundary-only: marker points with zero elements.
-- 3D unstructured surfaces are boundary-only: surface points and triangle
+- Solver-style 2D unstructured surfaces are thin side-wall boundary surfaces
+  with triangle elements, matching `example/run_case_2D`.
+- Flat 2D boundary curves with zero elements are supported for quick sketches.
+- 3D unstructured surfaces are boundary-only surface points and triangle
   elements.
 - The current mesh generator is uniform. Nonuniform segmented grids can be added
   on top of `GridAxis` without changing the case workflow.

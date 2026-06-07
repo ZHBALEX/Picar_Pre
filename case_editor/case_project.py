@@ -84,12 +84,16 @@ class CaseProject:
 
     def validate(self) -> list[str]:
         errors = []
+        ndim = self._input_ndim()
         if self.surface_path.exists():
             errors.extend(validate_surface(read_surface(self.surface_path)))
         else:
             errors.append(f"Missing surface file: {self.surface_path}")
 
-        for name in ["input.dat", "xgrid.dat", "ygrid.dat", "zgrid.dat"]:
+        required_files = ["input.dat", "xgrid.dat", "ygrid.dat"]
+        if ndim != 2:
+            required_files.append("zgrid.dat")
+        for name in required_files:
             if not (self.case_dir / name).exists():
                 errors.append(f"Missing file: {self.case_dir / name}")
 
@@ -114,8 +118,8 @@ class CaseProject:
         ]
         if self.input_path.exists():
             lines.extend(["", self.input_editor().summary()])
-        if all((self.case_dir / name).exists() for name in ["xgrid.dat", "ygrid.dat", "zgrid.dat"]):
-            lines.extend(["", mesh_summary(read_mesh(self.case_dir))])
+        if all((self.case_dir / name).exists() for name in ["xgrid.dat", "ygrid.dat"]):
+            lines.extend(["", mesh_summary(read_mesh(self.case_dir, require_z=self._input_ndim() != 2))])
         if self.surface_path.exists():
             lines.extend(["", self.surface_project.report()])
         if self.canonical_path.exists():
@@ -124,3 +128,8 @@ class CaseProject:
         lines.extend(["", "Case Validation", "===============", "Status: " + ("PASS" if not errors else "FAIL")])
         lines.extend(f"- {error}" for error in errors)
         return "\n".join(lines)
+
+    def _input_ndim(self) -> int | None:
+        if not self.input_path.exists():
+            return None
+        return self.input_editor().ndim()

@@ -92,6 +92,23 @@ class SurfaceProject:
         out = self.save(bodies, output=output)
         return out, bodies
 
+    def combine_surfaces(
+        self,
+        surface_files: list[str | Path],
+        output: str | Path | None = None,
+        append: bool = False,
+    ) -> tuple[Path, list[SurfaceBody]]:
+        """Combine one or more surface files into this project's surface file."""
+        if not surface_files:
+            raise ValueError("At least one surface file is required")
+
+        bodies = self.load(required=False) if append else []
+        for surface_file in surface_files:
+            bodies.extend(read_surface(self._resolve_input_path(surface_file)))
+
+        out = self.save(bodies, output=output)
+        return out, bodies
+
     def transform(
         self,
         body_ids: list[int] | None = None,
@@ -148,3 +165,11 @@ class SurfaceProject:
     def _resolve_path(self, path: str | Path) -> Path:
         path = Path(path)
         return path if path.is_absolute() else self.case_dir / path
+
+    def _resolve_input_path(self, path: str | Path) -> Path:
+        path = Path(path)
+        if path.is_absolute():
+            return path
+        if path.exists():
+            return path
+        return self.case_dir / path

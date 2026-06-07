@@ -3,7 +3,7 @@
 0.1    0.02                     ! plate thickness, depthOverLength
 ____________________________________________________________________________________________________________________________
 3         1                      ! motion_type, zoneMax
-96        0                      ! nPtsBodyMarker, totNumTriElem
+1800      2400                   ! nPtsBodyMarker, totNumTriElem
 
 
 !=========================

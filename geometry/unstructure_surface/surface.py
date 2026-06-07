@@ -72,10 +72,18 @@ def read_surface(path: str | Path, sentinel_tol: float = 5.0) -> list[SurfaceBod
 
         nodes = np.zeros((node_count, 4), dtype=float)
         for row in range(node_count):
-            if idx + 1 >= len(lines):
+            if idx >= len(lines):
                 raise ValueError(f"Body node block ended early near node {row + 1}")
 
             line1 = lines[idx].split()
+            if len(line1) >= 4:
+                nodes[row] = [int(line1[0]), float(line1[1]), float(line1[2]), float(line1[3])]
+                idx += 1
+                continue
+
+            if idx + 1 >= len(lines):
+                raise ValueError(f"Body node z coordinate is missing near node {row + 1}")
+
             line2 = lines[idx + 1].split()
             if len(line1) < 3 or len(line2) < 1:
                 raise ValueError(f"Invalid node record near nonempty line {idx + 1}")

@@ -42,11 +42,15 @@ case_editor/                        Full case input editing workflow
 
 This file stores only body boundary data.
 
-For 2D bodies:
+For solver-style 2D bodies:
 
-- nodes are boundary marker points
-- element count is `0`
-- no interior points are written
+- the body is stored as a very thin side-wall surface
+- nodes are boundary surface points on several spanwise layers
+- elements are boundary surface triangles
+- no interior or volume mesh is written
+
+A flat boundary-only curve with `elems = 0` is still useful for quick sketches,
+but the provided `example/run_case_2D` uses the thin side-wall format.
 
 For 3D bodies:
 
@@ -90,9 +94,11 @@ config = CaseBuildConfig(
         kind="circle",
         params={
             "radius": 0.25,
-            "n": 96,
+            "n": 600,
+            "layers": 3,
         },
-        center=(19.2, 10.0, 0.0),
+        center=(19.2, 10.0, 0.005),
+        thickness=0.01,
     ),
     mesh=MeshBuildConfig(
         nx=121,
@@ -142,9 +148,11 @@ from case_editor import build_2d_cylinder_case
 
 case = build_2d_cylinder_case(
     case_dir="example/generated_circle2d_case",
-    center=(19.2, 10.0, 0.0),
+    center=(19.2, 10.0, 0.005),
     radius=0.25,
-    points=96,
+    points=600,
+    thickness=0.01,
+    layers=3,
 )
 
 print(case.report())
@@ -183,15 +191,15 @@ skipped by default.
 ### 2. Generate a Boundary-Only 2D Cylinder
 
 ```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case generate circle --param radius=0.25 --param n=96 --center 19.2 10 0
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case generate circle --param radius=0.25 --param n=600 --param layers=3 --center 19.2 10 0.005 --thickness 0.01
 ```
 
 Expected surface:
 
 ```text
-nodes = 96
-elems = 0
-center = (19.2, 10.0, 0.0)
+nodes = 1800
+elems = 2400
+center = (19.2, 10.0, 0.005)
 radius = 0.25
 ```
 
@@ -256,9 +264,9 @@ that the arrays are unchanged.
 
 ### Visualize a 2D Boundary Surface
 
-For 2D `unstruc_surface_in.dat`, use `body2d`. A 2D body usually has boundary
-nodes and `elems = 0`, so this view draws the closed boundary curve from node
-order.
+For 2D `unstruc_surface_in.dat`, use `body2d`. Solver-style 2D cases are thin
+side-wall surfaces; `body2d` projects the surface to XY. If a quick sketch has
+`elems = 0`, it draws the closed boundary curve from node order.
 
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir example/generated_circle2d_case view body2d --body 1 --show-nodes
@@ -307,6 +315,30 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/
 ```
 
 If no STL paths are provided, all `*.stl` files in the case directory are used.
+
+### Combine Several Surface Files
+
+Use `combine` when you already have separate surface files and want one
+multi-body `unstruc_surface_in.dat`.
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case combine path/to/cylinder/unstruc_surface_in.dat path/to/foil/unstruc_surface_in.dat
+```
+
+The output is:
+
+```text
+case_editor/demo_case/unstruc_surface_in.dat
+```
+
+Each input body remains a separate body block. For example, cylinder becomes
+body 1 and foil becomes body 2.
+
+Append another surface to the current case surface:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case combine path/to/another_body/unstruc_surface_in.dat --append
+```
 
 ### Transform a Surface
 
@@ -370,8 +402,10 @@ project = SurfaceProject("case_editor/demo_case")
 out, bodies = project.generate(
     "circle",
     radius=0.25,
-    n=96,
-    center=(19.2, 10.0, 0.0),
+    n=600,
+    layers=3,
+    center=(19.2, 10.0, 0.005),
+    thickness=0.01,
 )
 
 print(out)
@@ -403,7 +437,10 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/
 - Command-line body ids are 1-based.
 - Python body lists are 0-based.
 - `body_type = 2` means canonical body in the current example format.
-- A 2D body should normally have boundary points and zero triangle elements.
+- Solver-style 2D examples use thin side-wall boundary surfaces with triangle
+  elements.
+- Flat boundary curves with zero elements are supported for sketches and quick
+  previews.
 - STL conversion creates 3D boundary surface triangles.
 - If a body node order or node count changes, any external files that refer to
   body node ids should be regenerated or checked.

@@ -103,7 +103,24 @@ Append converted STL bodies to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case convert-stl wing.stl --append
 ```
 
-### 3. Generate a Simple Parametric Body
+### 3. Combine Existing Surface Files
+
+Combine separate surface files into one multi-body `unstruc_surface_in.dat`:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case combine path/to/cylinder/unstruc_surface_in.dat path/to/foil/unstruc_surface_in.dat
+```
+
+Append bodies from another surface file to the current case surface:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case combine path/to/another_body/unstruc_surface_in.dat --append
+```
+
+Relative input paths are resolved from the current working directory first, then
+from `--case-dir`.
+
+### 4. Generate a Simple Parametric Body
 
 Generate an ellipse:
 
@@ -117,8 +134,20 @@ Generate a circle:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate circle --param radius=0.3 --param n=96
 ```
 
-For 2D models, the output is boundary-only: boundary nodes with `elem_count=0`.
-This matches the usual 2D cylinder/body marker convention.
+With no thickness, this creates a flat boundary curve with `elem_count=0`. For
+solver-style 2D cases matching `example/run_case_2D`, use a thin layered
+side-wall surface:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate circle --param radius=0.25 --param n=600 --param layers=3 --center 19.2 10 0.005 --thickness 0.01
+```
+
+This produces:
+
+```text
+nodes = 1800
+elems = 2400
+```
 
 Generate a rectangle:
 
@@ -150,7 +179,7 @@ Append generated body to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate circle --param radius=0.1 --append
 ```
 
-### 4. Transform Existing Surface Bodies
+### 5. Transform Existing Surface Bodies
 
 Transform all bodies:
 
@@ -170,7 +199,7 @@ Write transformed output to a new file:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case transform --body 1 --translate 0.1 0 0 --output unstruc_surface_shifted.dat
 ```
 
-### 5. Visualize
+### 6. Visualize
 
 Show all triangle meshes:
 
@@ -302,7 +331,7 @@ http://localhost:8765/geometry/unstructure_surface/editor/
 
 The editor can:
 
-- Generate 2D boundary-only circle/ellipse/rectangle/NACA bodies.
+- Generate flat 2D circle/ellipse/rectangle/NACA boundary curves.
 - Generate thin 3D side-wall surfaces by enabling thickness.
 - Preview with Three.js when CDN access is available; otherwise it falls back to
   a built-in canvas preview.
@@ -320,7 +349,7 @@ Center : 19.2, 10.0, 0.0
 3D     : off
 ```
 
-The exported surface should have:
+The exported flat boundary curve should have:
 
 ```text
 nodes = 96
@@ -364,7 +393,9 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/stl_
 - `surface.py`, `project.py`, `stl.py`, and `modeling.py` do not open windows.
 - Visualization functions may open PyVista or Matplotlib windows.
 - Coordinate-only transforms preserve node ids and topology.
-- 2D parametric bodies are boundary-only.
+- Flat parametric bodies have zero elements when `--thickness` is not used.
+- Solver-style 2D cases should use `--thickness` with `--param layers=3` to
+  create a thin side-wall surface like `example/run_case_2D`.
 - STL conversion writes STL boundary surface triangles.
 - `--thickness` creates a side-wall surface from an ordered 2D boundary; it does
   not add interior volume points.

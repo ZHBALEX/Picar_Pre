@@ -13,10 +13,10 @@ class SurfaceBuildConfig:
     """Parametric surface settings for one generated body."""
 
     kind: str = "circle"
-    params: dict[str, object] = field(default_factory=lambda: {"radius": 0.25, "n": 96})
-    center: tuple[float, float, float] = (19.2, 10.0, 0.0)
+    params: dict[str, object] = field(default_factory=lambda: {"radius": 0.25, "n": 600, "layers": 3})
+    center: tuple[float, float, float] = (19.2, 10.0, 0.005)
     plane: str = "xy"
-    thickness: float = 0.0
+    thickness: float = 0.01
     rotation: tuple[float, float, float] | None = None
     translate: tuple[float, float, float] | None = None
     scale: float = 1.0
@@ -121,17 +121,20 @@ def build_case(config: CaseBuildConfig) -> CaseProject:
 
 def build_2d_cylinder_case(
     case_dir: str | Path = "example/generated_circle2d_case",
-    center: tuple[float, float, float] = (19.2, 10.0, 0.0),
+    center: tuple[float, float, float] = (19.2, 10.0, 0.005),
     radius: float = 0.25,
-    points: int = 96,
+    points: int = 600,
+    thickness: float = 0.01,
+    layers: int = 3,
 ) -> CaseProject:
-    """Build the default boundary-only 2D cylinder case."""
+    """Build the default thin side-wall 2D cylinder case."""
     config = CaseBuildConfig(
         case_dir=case_dir,
         surface=SurfaceBuildConfig(
             kind="circle",
-            params={"radius": radius, "n": points},
+            params={"radius": radius, "n": points, "layers": layers},
             center=center,
+            thickness=thickness,
         ),
     )
     return build_case(config)

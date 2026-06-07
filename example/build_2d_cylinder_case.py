@@ -19,9 +19,11 @@ def main() -> None:
             kind="circle",
             params={
                 "radius": 0.25,
-                "n": 96,
+                "n": 600,
+                "layers": 3,
             },
-            center=(19.2, 10.0, 0.0),
+            center=(19.2, 10.0, 0.005),
+            thickness=0.01,
         ),
         mesh=MeshBuildConfig(
             nx=121,

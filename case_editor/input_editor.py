@@ -29,6 +29,10 @@ class InputDatEditor:
         idx = self._find_marker(marker)
         self.lines[idx + 1] = _format_values(values)
 
+    def ndim(self) -> int:
+        """Return the solver dimension from input.dat."""
+        return int(float(self.get_values_after("ndim")[0]))
+
     def set_grid_counts(self, nx: int, ny: int, nz: int) -> None:
         self.set_values_after("nx", [nx, ny, nz])
 
@@ -85,6 +89,7 @@ class InputDatEditor:
             "Input.dat",
             "=========",
             f"path        : {self.path}",
+            f"ndim        : {self.ndim()}",
             f"grid counts : {' '.join(self.get_values_after('nx')[:3])}",
             f"x control   : {' '.join(self.get_values_after('xgrid_unif')[:2])}",
             f"y control   : {' '.join(self.get_values_after('ygrid_unif')[:2])}",

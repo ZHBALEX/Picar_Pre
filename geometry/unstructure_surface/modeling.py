@@ -111,26 +111,34 @@ def make_naca_2d(
     return body_from_boundary_points(points)
 
 
-def extrude_body(body: SurfaceBody, thickness: float, axis: str = "z") -> SurfaceBody:
-    """Extrude an ordered boundary curve into a side-wall surface."""
+def extrude_body(body: SurfaceBody, thickness: float, axis: str = "z", layers: int = 2) -> SurfaceBody:
+    """Extrude an ordered boundary curve into a layered side-wall surface."""
     if thickness <= 0:
         raise ValueError("thickness must be positive")
+    if layers < 2:
+        raise ValueError("layers must be at least 2")
 
     points = body.points
-    offset = np.zeros(3)
     axis_i = _axis_index(axis)
-    offset[axis_i] = thickness / 2.0
 
-    bottom = points - offset
-    top = points + offset
-    all_points = np.vstack([bottom, top])
+    layer_offsets = np.linspace(-thickness / 2.0, thickness / 2.0, layers)
+    layer_points = []
+    for offset_value in layer_offsets:
+        offset = np.zeros(3)
+        offset[axis_i] = offset_value
+        layer_points.append(points + offset)
+
+    all_points = np.vstack(layer_points)
     n = len(points)
 
     faces = []
-    for a in range(n):
-        b = 0 if a == n - 1 else a + 1
-        faces.append([a, b, b + n])
-        faces.append([a, b + n, a + n])
+    for layer in range(layers - 1):
+        lower = layer * n
+        upper = (layer + 1) * n
+        for a in range(n):
+            b = 0 if a == n - 1 else a + 1
+            faces.append([lower + a, lower + b, upper + b])
+            faces.append([lower + a, upper + b, upper + a])
 
     return body_from_points_and_faces(all_points, np.asarray(faces, dtype=int))
 
@@ -183,7 +191,8 @@ def make_parametric_body(
         raise ValueError(f"Unsupported parametric body kind: {kind}")
 
     if thickness > 0.0:
-        body = extrude_body(body, thickness=thickness, axis=_normal_axis_for_plane(plane))
+        layers = int(params.get("layers", params.get("z_layers", 2)))
+        body = extrude_body(body, thickness=thickness, axis=_normal_axis_for_plane(plane), layers=layers)
 
     return transform_body(body, rotation=rotation, translate=translate, scale=scale)
 
@@ -220,4 +229,3 @@ def _axis_index(axis: str) -> int:
     if axis == "z":
         return 2
     raise ValueError("axis must be 'x', 'y', or 'z'")
-

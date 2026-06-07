@@ -44,12 +44,20 @@ def parse_scalar(value: str) -> object:
     lowered = value.lower()
     if lowered in {"true", "false"}:
         return lowered == "true"
+    if _has_leading_zero_digits(value):
+        return value
     try:
         if any(ch in value for ch in [".", "e", "E"]):
             return float(value)
         return int(value)
     except ValueError:
         return value
+
+
+def _has_leading_zero_digits(value: str) -> bool:
+    """Return True for digit strings like 0012 that should stay strings."""
+    signless = value[1:] if value.startswith(("+", "-")) else value
+    return len(signless) > 1 and signless.startswith("0") and signless.isdigit()
 
 
 def add_project_args(parser: argparse.ArgumentParser) -> None:
@@ -71,6 +79,11 @@ def parse_args() -> argparse.Namespace:
     convert.add_argument("--output", default=None, help="Output filename/path. Defaults to surface-name in case-dir.")
     convert.add_argument("--append", action="store_true", help="Append converted STL bodies to the existing surface.")
     convert.add_argument("--precision", type=int, default=8, help="Decimal precision before STL vertex deduplication.")
+
+    combine = subparsers.add_parser("combine", help="Combine multiple surface files into one multi-body surface.")
+    combine.add_argument("surface", nargs="+", help="Surface files to combine. Relative paths are resolved from cwd first, then case-dir.")
+    combine.add_argument("--output", default=None, help="Output filename/path. Defaults to surface-name in case-dir.")
+    combine.add_argument("--append", action="store_true", help="Append input surface bodies to the existing target surface.")
 
     generate = subparsers.add_parser("generate", help="Generate a simple parametric body.")
     generate.add_argument("kind", choices=["circle", "ellipse", "rectangle", "naca"], help="Parametric model kind.")
@@ -151,6 +164,15 @@ def main() -> None:
             precision=args.precision,
         )
         print_write_report("STL Conversion", project, out, len(bodies))
+        print(project.report(surface_path=out, bodies=bodies))
+
+    elif args.command == "combine":
+        out, bodies = project.combine_surfaces(
+            surface_files=args.surface,
+            output=args.output,
+            append=args.append,
+        )
+        print_write_report("Surface Combine", project, out, len(bodies))
         print(project.report(surface_path=out, bodies=bodies))
 
     elif args.command == "generate":
