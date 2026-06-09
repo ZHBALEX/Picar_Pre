@@ -341,11 +341,32 @@ The editor can:
 
 - Generate flat 2D circle/ellipse/rectangle/NACA boundary curves.
 - Generate thin 3D side-wall surfaces by enabling thickness.
-- Preview with Three.js when CDN access is available; otherwise it falls back to
-  a built-in canvas preview.
+- Preview with Three.js orbit controls when CDN access is available; otherwise
+  it falls back to a built-in canvas preview.
+- Rotate with left drag, zoom with the mouse wheel, and pan with right drag.
+- Switch view with `ISO`, `Top`, and `Fit`.
 - Export `unstruc_surface_in.dat`.
 - Export STL for 3D side-wall surfaces.
 - Copy the equivalent `run_surface_tools.py generate ...` command.
+
+Default editor settings are solver-style:
+
+```text
+Shape     : Circle / 2D cylinder
+Radius    : 0.25
+Points    : 600
+Center    : 19.2, 10.0, 0.005
+3D        : on
+Thickness : 0.01
+Layers    : 3
+```
+
+This exports:
+
+```text
+nodes = 1800
+elems = 2400
+```
 
 Example editor settings for a 2D cylinder:
 

@@ -379,10 +379,33 @@ The editor supports:
 
 - 2D circle, ellipse, rectangle, and NACA boundaries
 - optional thin 3D side-wall extrusion
-- preview with Three.js when available
+- Three.js orbit preview when CDN access is available
+- closed line rendering for flat boundaries
+- translucent mesh and edge rendering for thin side-wall surfaces
+- left-drag rotate, mouse wheel zoom, and right-drag pan
+- `ISO`, `Top`, and `Fit` view buttons
 - export of `unstruc_surface_in.dat`
 - export of STL for 3D side-wall models
 - copying an equivalent CLI command
+
+Default editor settings generate a solver-style 2D cylinder:
+
+```text
+Shape     : Circle / 2D cylinder
+Radius    : 0.25
+Points    : 600
+Center    : 19.2, 10.0, 0.005
+3D        : on
+Thickness : 0.01
+Layers    : 3
+```
+
+Expected output:
+
+```text
+nodes = 1800
+elems = 2400
+```
 
 ## Python API Examples
 

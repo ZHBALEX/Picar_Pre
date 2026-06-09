@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Unstructured Surface Editor</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=4">
 </head>
 <body>
   <main class="app-shell">
@@ -33,7 +33,7 @@
           </label>
           <label data-shape="circle ellipse naca">
             Points
-            <input id="points" type="number" step="1" min="8" value="96">
+            <input id="points" type="number" step="1" min="8" value="600">
           </label>
           <label data-shape="ellipse">
             Rx
@@ -67,7 +67,7 @@
         <div class="grid three">
           <label>X<input id="centerX" type="number" step="0.01" value="19.2"></label>
           <label>Y<input id="centerY" type="number" step="0.01" value="10"></label>
-          <label>Z<input id="centerZ" type="number" step="0.01" value="0"></label>
+          <label>Z<input id="centerZ" type="number" step="0.01" value="0.005"></label>
         </div>
         <div class="grid three">
           <label>Rx deg<input id="rotX" type="number" step="1" value="0"></label>
@@ -93,13 +93,19 @@
       <section class="panel">
         <h2>Surface</h2>
         <label class="toggle">
-          <input id="make3d" type="checkbox">
+          <input id="make3d" type="checkbox" checked>
           Create thin 3D side-wall surface
         </label>
-        <label>
-          Thickness
-          <input id="thickness" type="number" step="0.01" value="0.10">
-        </label>
+        <div class="grid two">
+          <label>
+            Thickness
+            <input id="thickness" type="number" step="0.001" value="0.01">
+          </label>
+          <label>
+            Layers
+            <input id="layers" type="number" step="1" min="2" value="3">
+          </label>
+        </div>
       </section>
 
       <section class="panel actions">
@@ -116,15 +122,24 @@
           <strong id="summaryTitle">Preview</strong>
           <span id="rendererStatus">Canvas preview</span>
         </div>
+        <div class="view-actions">
+          <button id="mode2d" type="button">2D Edit</button>
+          <button id="mode3d" type="button">3D View</button>
+          <button id="viewIso" type="button">ISO</button>
+          <button id="viewTop" type="button">Top</button>
+          <button id="fitView" type="button">Fit</button>
+        </div>
         <div class="stats" id="stats"></div>
       </div>
       <div id="viewer" class="viewer">
         <canvas id="fallbackCanvas"></canvas>
+        <div id="viewerHelp" class="viewer-help">2D: Left drag pan | Wheel zoom</div>
+        <div id="cursorReadout" class="cursor-readout">u=0, v=0</div>
       </div>
       <pre id="commandBox" class="command-box"></pre>
     </section>
   </main>
 
-  <script src="./app.js"></script>
+  <script src="./app.js?v=4"></script>
 </body>
 </html>
