@@ -6,6 +6,7 @@ The current focus is the solid/body pipeline:
 - generate or convert `unstruc_surface_in.dat`
 - keep `canonical_body_in.dat` consistent with the surface file
 - generate structured grid files
+- inspect or edit large prescribed-motion `fort.*` files separately
 - edit common `input.dat` parameters
 - validate the whole case directory before running the solver
 
@@ -34,6 +35,10 @@ case_editor/                        Full case input editing workflow
   input_editor.py                   input.dat editor
   canonical_body_editor.py          canonical_body_in.dat editor
   mesh_editor.py                    x/y/z grid editor
+
+motion/                             Large fort.* prescribed-motion tools
+  run_motion_tools.py               CLI for inspecting and rotating motion files
+  fort.py                           Binary fort.* read/write helpers
 ```
 
 ## Main Concepts
@@ -74,6 +79,13 @@ format as much as possible:
 - initial velocity
 - Reynolds number and time step
 - internal boundary settings
+
+### `fort.*` prescribed motion
+
+Large `fort.*` files store prescribed relative surface motion. These tools live
+under `motion/` so static surface edits do not automatically rewrite hundreds of
+MB of binary motion data. Translation of `unstruc_surface_in.dat` does not need
+motion edits, but rotation should rotate the stored relative vectors separately.
 
 ## Quick Start: Build a 2D Cylinder Case
 
