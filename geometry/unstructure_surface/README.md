@@ -65,6 +65,14 @@ example/run_case
 python geometry/unstructure_surface/run_surface_tools.py inspect
 ```
 
+The terminal report is printed as narrow body cards. Each axis line shows:
+
+```text
+x range : min .. max  span=value  [-----*-----]
+```
+
+The `*` marks the body center relative to that axis range.
+
 With round-trip write/read verification:
 
 ```powershell

@@ -8,7 +8,7 @@ from .stl import stl_to_surface_body
 from .surface import (
     DEFAULT_CASE_SURFACE,
     SurfaceBody,
-    format_surface_summary,
+    format_surface_summary_compact,
     format_validation_report,
     read_surface,
     transform_body,
@@ -154,7 +154,7 @@ class SurfaceProject:
                 "",
                 "Surface Summary",
                 "===============",
-                format_surface_summary(bodies),
+                format_surface_summary_compact(bodies),
                 "",
                 "Validation",
                 "==========",

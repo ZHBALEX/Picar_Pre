@@ -188,9 +188,56 @@ def format_surface_summary(bodies: Iterable[SurfaceBody]) -> str:
     return "\n".join(body_lines)
 
 
+def format_surface_summary_compact(bodies: Iterable[SurfaceBody]) -> str:
+    """Format body counts and ranges as narrow vertical cards."""
+    rows = list(summarize_surface(bodies))
+    if not rows:
+        return "No bodies found."
+
+    lines = []
+    for item in rows:
+        xyz_min = item["min"]
+        xyz_max = item["max"]
+        center = item["center"]
+        spans = xyz_max - xyz_min
+        lines.extend(
+            [
+                f"Body {item['body']}",
+                "-" * 6,
+                f"  nodes / elems : {item['nodes']} / {item['elems']}",
+                f"  center        : x={center[0]:.6f}, y={center[1]:.6f}, z={center[2]:.6f}",
+                _format_axis_line("x", xyz_min[0], xyz_max[0], center[0], spans[0]),
+                _format_axis_line("y", xyz_min[1], xyz_max[1], center[1], spans[1]),
+                _format_axis_line("z", xyz_min[2], xyz_max[2], center[2], spans[2]),
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip()
+
+
+def _format_axis_line(axis: str, vmin: float, vmax: float, center: float, span: float) -> str:
+    return f"  {axis} range       : {vmin:.6f} .. {vmax:.6f}  span={span:.6f}  {_axis_bar(vmin, vmax, center)}"
+
+
+def _axis_bar(vmin: float, vmax: float, marker: float, width: int = 24) -> str:
+    """Return a small ASCII range bar with the center marker."""
+    if width < 3:
+        width = 3
+    if np.isclose(vmin, vmax):
+        chars = ["-"] * width
+        chars[width // 2] = "*"
+        return "[" + "".join(chars) + "]"
+
+    ratio = (marker - vmin) / (vmax - vmin)
+    marker_idx = int(round(np.clip(ratio, 0.0, 1.0) * (width - 1)))
+    chars = ["-"] * width
+    chars[marker_idx] = "*"
+    return "[" + "".join(chars) + "]"
+
+
 def print_surface_summary(bodies: Iterable[SurfaceBody]) -> None:
     """Print a compact body-by-body geometry summary."""
-    print(format_surface_summary(bodies))
+    print(format_surface_summary_compact(bodies))
 
 
 def format_validation_report(errors: Iterable[str]) -> str:
@@ -214,7 +261,7 @@ def print_surface_report(bodies: Iterable[SurfaceBody], errors: Iterable[str] | 
     bodies = list(bodies)
     print("Surface Summary")
     print("=" * 15)
-    print(format_surface_summary(bodies))
+    print(format_surface_summary_compact(bodies))
     print()
     print("Validation")
     print("=" * 10)
