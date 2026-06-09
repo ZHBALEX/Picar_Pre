@@ -1,3 +1,5 @@
 /geometry/unstructure_surface/__pycache__
 /geometry/__pycache__
 example/run_case/fort.*
+*.pyc
+/mesh/examples

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesh Input Designer</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <header class="app-header">
+        <h1>Mesh Input Designer</h1>
+        <p>Define ranges, optimize dense counts, then export mesh input.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Global</h2>
+        <div class="grid two">
+          <label>Scale<input id="scaleRef" type="number" step="0.01" value="1"></label>
+          <label>Relax<input id="relax" type="number" step="0.0001" value="0.001"></label>
+        </div>
+        <div class="grid two">
+          <label>Method
+            <select id="method">
+              <option value="table">Table</option>
+              <option value="search">Search</option>
+            </select>
+          </label>
+          <label>Priority
+            <select id="priority">
+              <option value="dense">Dense</option>
+              <option value="balanced">Balanced</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid two">
+          <label>Max dense change<input id="maxChange" type="number" min="0" max="1" step="0.01" value="0.25"></label>
+          <label>Search window<input id="searchWindow" type="number" min="1" step="1" value="32"></label>
+        </div>
+      </section>
+
+      <section class="panel axis-panel" data-axis="x">
+        <h2>X Axis</h2>
+        <div class="grid four">
+          <label>Start<input id="xStart" type="number" step="0.01" value="0"></label>
+          <label>Dense start<input id="xDenseStart" type="number" step="0.01" value="8"></label>
+          <label>Dense end<input id="xDenseEnd" type="number" step="0.01" value="16"></label>
+          <label>End<input id="xEnd" type="number" step="0.01" value="24"></label>
+        </div>
+        <div class="grid four">
+          <label>Left stretch<input id="xLeftStretch" type="number" min="0" step="1" value="16"></label>
+          <label>Left layer<input id="xLeftUniform" type="number" min="0" step="1" value="8"></label>
+          <label>Dense<input id="xDenseCount" type="number" min="1" step="1" value="64"></label>
+          <label>Right layer<input id="xRightUniform" type="number" min="0" step="1" value="8"></label>
+        </div>
+        <div class="grid four">
+          <label>Right stretch<input id="xRightStretch" type="number" min="0" step="1" value="16"></label>
+          <label>Layer left<input id="xLeftLayerLength" type="number" min="0" step="0.01" value="1"></label>
+          <label>Layer right<input id="xRightLayerLength" type="number" min="0" step="0.01" value="1"></label>
+          <label>Ideal dx<input id="xIdealDelta" type="number" min="0" step="0.0001" value="0.125"></label>
+        </div>
+        <div class="grid two">
+          <label>Ratio left<input id="xLeftRatio" type="number" min="0.0001" step="0.01" value="1.08"></label>
+          <label>Ratio right<input id="xRightRatio" type="number" min="0.0001" step="0.01" value="1.08"></label>
+        </div>
+      </section>
+
+      <section class="panel axis-panel" data-axis="y">
+        <h2>Y Axis</h2>
+        <div class="grid four">
+          <label>Start<input id="yStart" type="number" step="0.01" value="0"></label>
+          <label>Dense start<input id="yDenseStart" type="number" step="0.01" value="7"></label>
+          <label>Dense end<input id="yDenseEnd" type="number" step="0.01" value="13"></label>
+          <label>End<input id="yEnd" type="number" step="0.01" value="20"></label>
+        </div>
+        <div class="grid four">
+          <label>Bottom stretch<input id="yLeftStretch" type="number" min="0" step="1" value="16"></label>
+          <label>Bottom layer<input id="yLeftUniform" type="number" min="0" step="1" value="8"></label>
+          <label>Dense<input id="yDenseCount" type="number" min="1" step="1" value="48"></label>
+          <label>Top layer<input id="yRightUniform" type="number" min="0" step="1" value="8"></label>
+        </div>
+        <div class="grid four">
+          <label>Top stretch<input id="yRightStretch" type="number" min="0" step="1" value="16"></label>
+          <label>Layer bottom<input id="yLeftLayerLength" type="number" min="0" step="0.01" value="1"></label>
+          <label>Layer top<input id="yRightLayerLength" type="number" min="0" step="0.01" value="1"></label>
+          <label>Ideal dy<input id="yIdealDelta" type="number" min="0" step="0.0001" value="0.125"></label>
+        </div>
+        <div class="grid two">
+          <label>Ratio bottom<input id="yLeftRatio" type="number" min="0.0001" step="0.01" value="1.06"></label>
+          <label>Ratio top<input id="yRightRatio" type="number" min="0.0001" step="0.01" value="1.06"></label>
+        </div>
+      </section>
+
+      <section class="panel axis-panel" data-axis="z">
+        <h2>Z Axis</h2>
+        <div class="grid four">
+          <label>Start<input id="zStart" type="number" step="0.01" value="0"></label>
+          <label>Dense start<input id="zDenseStart" type="number" step="0.01" value="1"></label>
+          <label>Dense end<input id="zDenseEnd" type="number" step="0.01" value="3"></label>
+          <label>End<input id="zEnd" type="number" step="0.01" value="4"></label>
+        </div>
+        <div class="grid four">
+          <label>Front stretch<input id="zLeftStretch" type="number" min="0" step="1" value="4"></label>
+          <label>Front layer<input id="zLeftUniform" type="number" min="0" step="1" value="2"></label>
+          <label>Dense<input id="zDenseCount" type="number" min="1" step="1" value="16"></label>
+          <label>Back layer<input id="zRightUniform" type="number" min="0" step="1" value="2"></label>
+        </div>
+        <div class="grid four">
+          <label>Back stretch<input id="zRightStretch" type="number" min="0" step="1" value="4"></label>
+          <label>Layer front<input id="zLeftLayerLength" type="number" min="0" step="0.01" value="0.25"></label>
+          <label>Layer back<input id="zRightLayerLength" type="number" min="0" step="0.01" value="0.25"></label>
+          <label>Ideal dz<input id="zIdealDelta" type="number" min="0" step="0.0001" value="0.125"></label>
+        </div>
+        <div class="grid two">
+          <label>Ratio front<input id="zLeftRatio" type="number" min="0.0001" step="0.01" value="1.03"></label>
+          <label>Ratio back<input id="zRightRatio" type="number" min="0.0001" step="0.01" value="1.03"></label>
+        </div>
+      </section>
+
+      <section class="panel actions">
+        <h2>Input</h2>
+        <button id="optimizeCounts">Optimize counts</button>
+        <button id="confirmInput">Confirm input</button>
+        <button id="downloadInput">Download input.dat</button>
+        <button id="copyInput">Copy input text</button>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="toolbar">
+        <div>
+          <strong id="summaryTitle">Design preview</strong>
+          <span id="statusText">Not confirmed</span>
+        </div>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div class="preview-layout">
+        <div class="plot-panel">
+          <div class="canvas-wrap">
+            <canvas id="gridCanvas"></canvas>
+          </div>
+          <table id="qualityTable"></table>
+        </div>
+        <pre id="inputPreview" class="input-preview"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
