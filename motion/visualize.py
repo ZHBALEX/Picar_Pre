@@ -9,14 +9,34 @@ from geometry.unstructure_surface.surface import SurfaceBody
 from .fort import fort_motion_info, read_frame
 
 
-def deformed_body(body: SurfaceBody, displacement: np.ndarray) -> SurfaceBody:
-    """Return a body displaced by one fort.* frame."""
-    displacement = np.asarray(displacement, dtype=float)
-    if displacement.shape != body.points.shape:
-        raise ValueError(f"Displacement shape {displacement.shape} does not match body points {body.points.shape}")
+def deformed_body(body: SurfaceBody, motion: np.ndarray, mode: str = "displacement") -> SurfaceBody:
+    """Return one body frame from fort.* motion data.
+
+    mode="relative" treats fort values as marker positions relative to the
+    reference body center. mode="displacement" treats fort values as nodal
+    displacements added to the reference surface.
+    """
+    motion = np.asarray(motion, dtype=float)
+    if motion.shape != body.points.shape:
+        raise ValueError(f"Motion shape {motion.shape} does not match body points {body.points.shape}")
 
     nodes = body.nodes.copy()
-    nodes[:, 1:4] = body.points + displacement
+    if mode == "relative":
+        nodes[:, 1:4] = body.points.mean(axis=0).reshape(1, 3) + motion
+    elif mode == "displacement":
+        nodes[:, 1:4] = body.points + motion
+    else:
+        raise ValueError("mode must be 'relative' or 'displacement'")
+    return SurfaceBody(nodes=nodes, elems=body.elems.copy(), bbox=body.bbox)
+
+
+def body_from_points(body: SurfaceBody, points: np.ndarray) -> SurfaceBody:
+    """Return a body with replaced point coordinates and preserved topology."""
+    points = np.asarray(points, dtype=float)
+    if points.shape != body.points.shape:
+        raise ValueError(f"Point shape {points.shape} does not match body points {body.points.shape}")
+    nodes = body.nodes.copy()
+    nodes[:, 1:4] = points
     return SurfaceBody(nodes=nodes, elems=body.elems.copy(), bbox=body.bbox)
 
 
@@ -38,9 +58,11 @@ def plot_motion_2d(
     frame: int = -1,
     samples: int = 24,
     plane: str = "xy",
+    component_order: str = "xyz",
+    motion_mode: str = "velocity",
     save_path: str | Path | None = None,
     show: bool = True,
-    figsize: tuple[float, float] = (12.0, 5.0),
+    figsize: tuple[float, float] = (8.0, 8.0),
 ):
     """Plot sampled prescribed motion as a 2D projected envelope."""
     if not show or save_path is not None:
@@ -54,19 +76,26 @@ def plot_motion_2d(
     frame = _normalize_frame(frame, info.frame_count)
     axes = _plane_axes(plane)
     sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    frame_points, frame_times = motion_points_for_frames(
+        body,
+        fort_path,
+        sample_indices,
+        component_order=component_order,
+        motion_mode=motion_mode,
+    )
 
     fig, ax = plt.subplots(figsize=figsize)
     all_points = []
+    line_indices = _reference_polyline_indices(body, axes)
 
     for sample_idx in sample_indices:
-        _, displacement = read_frame(fort_path, sample_idx, node_count=body.node_count)
-        deformed = deformed_body(body, displacement)
+        deformed = body_from_points(body, frame_points[sample_idx])
         all_points.append(deformed.points[:, axes])
         color = "red" if sample_idx == frame else "0.65"
         linewidth = 1.8 if sample_idx == frame else 0.45
         alpha = 0.95 if sample_idx == frame else 0.35
         zorder = 5 if sample_idx == frame else 1
-        lines = _projected_lines(deformed, axes)
+        lines = _polyline_from_indices(deformed.points[:, axes], line_indices) if line_indices is not None else _projected_lines(deformed, axes)
         if lines:
             ax.add_collection(LineCollection(lines, colors=color, linewidths=linewidth, alpha=alpha, zorder=zorder))
         else:
@@ -76,10 +105,15 @@ def plot_motion_2d(
     all_points_arr = np.vstack(all_points)
     _set_equal_2d_limits(ax, all_points_arr)
     ax.set_aspect("equal", adjustable="box")
+    if hasattr(ax, "set_box_aspect"):
+        ax.set_box_aspect(1)
     ax.grid(True, alpha=0.18)
     ax.set_xlabel(plane[0].upper())
     ax.set_ylabel(plane[1].upper())
-    ax.set_title(f"Body motion envelope: frame {frame} / {info.frame_count - 1}, time={read_frame(fort_path, frame, body.node_count)[0].time:.6g}")
+    ax.set_title(
+        f"Body motion envelope: frame {frame} / {info.frame_count - 1}, "
+        f"time={frame_times[frame]:.6g}"
+    )
 
     if save_path:
         save_path = Path(save_path)
@@ -103,6 +137,8 @@ def plot_motion_3d(
     *,
     frame: int = -1,
     samples: int = 16,
+    component_order: str = "xyz",
+    motion_mode: str = "velocity",
     save_path: str | Path | None = None,
     show: bool = True,
 ):
@@ -114,11 +150,17 @@ def plot_motion_3d(
     info = fort_motion_info(fort_path)
     frame = _normalize_frame(frame, info.frame_count)
     sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    frame_points, _ = motion_points_for_frames(
+        body,
+        fort_path,
+        sample_indices,
+        component_order=component_order,
+        motion_mode=motion_mode,
+    )
 
     plotter = pv.Plotter(off_screen=not show)
     for sample_idx in sample_indices:
-        _, displacement = read_frame(fort_path, sample_idx, node_count=body.node_count)
-        deformed = deformed_body(body, displacement)
+        deformed = body_from_points(body, frame_points[sample_idx])
         mesh = body_to_pyvista_mesh(deformed) if body.elem_count > 0 else pv.PolyData(deformed.points)
         if sample_idx == frame:
             plotter.add_mesh(mesh, color="red", show_edges=True, line_width=3, point_size=4)
@@ -140,6 +182,44 @@ def plot_motion_3d(
         plotter.close()
 
 
+def motion_points_for_frames(
+    body: SurfaceBody,
+    fort_path: str | Path,
+    frame_indices: list[int],
+    *,
+    component_order: str = "xyz",
+    motion_mode: str = "velocity",
+) -> tuple[dict[int, np.ndarray], dict[int, float]]:
+    """Return physical body points for requested fort frame indices."""
+    if not frame_indices:
+        return {}, {}
+    info = fort_motion_info(fort_path)
+    targets = set(int(item) for item in frame_indices)
+    for frame_index in targets:
+        _normalize_frame(frame_index, info.frame_count)
+
+    if motion_mode == "velocity":
+        points = body.points.copy()
+        result: dict[int, np.ndarray] = {}
+        times: dict[int, float] = {}
+        max_target = max(targets)
+        for frame_index in range(max_target + 1):
+            header, velocity = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
+            points = points + velocity * header.dt
+            if frame_index in targets:
+                result[frame_index] = points.copy()
+                times[frame_index] = header.time
+        return result, times
+
+    result = {}
+    times = {}
+    for frame_index in sorted(targets):
+        header, motion = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
+        result[frame_index] = deformed_body(body, motion, mode=motion_mode).points
+        times[frame_index] = header.time
+    return result, times
+
+
 def _normalize_frame(frame: int, frame_count: int) -> int:
     frame = int(frame)
     if frame < 0:
@@ -158,10 +238,6 @@ def _plane_axes(plane: str) -> tuple[int, int]:
 
 
 def _projected_lines(body: SurfaceBody, axes: tuple[int, int]) -> list[list[np.ndarray]]:
-    layered_boundary = _layered_boundary_lines(body, axes)
-    if layered_boundary:
-        return layered_boundary
-
     points = body.points[:, axes]
     if body.elem_count > 0:
         node_map = {int(body.nodes[i, 0]): i for i in range(len(body.nodes))}
@@ -183,28 +259,32 @@ def _projected_lines(body: SurfaceBody, axes: tuple[int, int]) -> list[list[np.n
     return lines
 
 
-def _layered_boundary_lines(body: SurfaceBody, axes: tuple[int, int]) -> list[list[np.ndarray]]:
-    """Return one representative closed layer for thin side-wall XY projections."""
+def _reference_polyline_indices(body: SurfaceBody, axes: tuple[int, int]) -> np.ndarray | None:
+    """Return representative reference node indices for clean 2D outlines."""
     if axes != (0, 1) or body.node_count < 6:
-        return []
+        return None
 
     z_values = body.points[:, 2]
     z_span = float(z_values.max() - z_values.min())
     xy_span = float((body.points[:, :2].max(axis=0) - body.points[:, :2].min(axis=0)).max())
     if xy_span <= 0.0 or z_span > 0.1 * xy_span:
-        return []
+        return None
 
     rounded_z = np.round(z_values, decimals=10)
     unique_z = np.unique(rounded_z)
     if len(unique_z) < 2 or len(unique_z) > 20:
-        return []
+        return None
 
-    target_z = unique_z[np.argmin(np.abs(unique_z - np.median(unique_z)))]
+    target_z = unique_z[0]
     layer_idx = np.flatnonzero(rounded_z == target_z)
     if len(layer_idx) < 3:
-        return []
+        return None
 
-    points = body.points[layer_idx][:, axes]
+    return layer_idx
+
+
+def _polyline_from_indices(points: np.ndarray, indices: np.ndarray) -> list[list[np.ndarray]]:
+    points = points[indices]
     lines = [[points[idx], points[idx + 1]] for idx in range(len(points) - 1)]
     lines.append([points[-1], points[0]])
     return lines

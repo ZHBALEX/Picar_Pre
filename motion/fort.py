@@ -88,8 +88,18 @@ def read_frame_header(path: str | Path, frame_index: int, node_count: int | None
     return MotionFrameHeader(dt=dt, time=time, node_count=npts)
 
 
-def read_frame(path: str | Path, frame_index: int, node_count: int | None = None) -> tuple[MotionFrameHeader, np.ndarray]:
-    """Read one frame as (header, motion_vectors)."""
+def read_frame(
+    path: str | Path,
+    frame_index: int,
+    node_count: int | None = None,
+    component_order: str | None = None,
+) -> tuple[MotionFrameHeader, np.ndarray]:
+    """Read one frame as (header, motion_vectors).
+
+    component_order describes the raw fort columns. For example, "yxz" means
+    raw column 0 is physical y, raw column 1 is physical x, and raw column 2 is
+    physical z. Use None to return raw file order.
+    """
     path = Path(path)
     header = read_frame_header(path, frame_index, node_count=node_count)
     offset = _frame_offset(frame_index, header.node_count) + FRAME_HEADER_BYTES
@@ -101,7 +111,10 @@ def read_frame(path: str | Path, frame_index: int, node_count: int | None = None
     if len(records) != header.node_count:
         raise ValueError(f"Could not read complete frame {frame_index} from {path}")
     _validate_node_markers(records, path, frame_index)
-    return header, records["xyz"].copy()
+    vectors = records["xyz"].copy()
+    if component_order is not None:
+        vectors = components_to_physical(vectors, component_order)
+    return header, vectors
 
 
 def rotate_fort_motion(
@@ -110,12 +123,13 @@ def rotate_fort_motion(
     rotation: tuple[float, float, float],
     *,
     chunk_nodes: int = 65536,
+    component_order: str = "xyz",
 ) -> FortMotionInfo:
     """Rotate all motion vectors in a fort.* file and write a new file.
 
     The fort.* values are relative vectors, so translation is intentionally not
-    supported. Rotation uses the same XYZ Euler degrees convention as
-    geometry.unstructure_surface.surface.transform_points.
+    supported. component_order maps raw file columns to physical x/y/z before
+    applying the same XYZ Euler degrees convention as surface transforms.
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -138,7 +152,9 @@ def rotate_fort_motion(
                 _validate_node_markers(records, input_path, frame_index)
 
                 records = records.copy()
-                records["xyz"] = transform_points(records["xyz"], rotation=rotation, translate=None, scale=1.0)
+                physical = components_to_physical(records["xyz"], component_order)
+                rotated = transform_points(physical, rotation=rotation, translate=None, scale=1.0)
+                records["xyz"] = physical_to_components(rotated, component_order)
                 records.tofile(dst)
                 remaining -= count
 
@@ -168,6 +184,26 @@ def format_motion_info(info: FortMotionInfo) -> str:
     )
 
 
+def components_to_physical(vectors: np.ndarray, component_order: str = "xyz") -> np.ndarray:
+    """Convert raw fort columns to physical x/y/z columns."""
+    order = _validate_component_order(component_order)
+    vectors = np.asarray(vectors, dtype=float)
+    result = np.empty_like(vectors)
+    for raw_col, label in enumerate(order):
+        result[:, _axis_index(label)] = vectors[:, raw_col]
+    return result
+
+
+def physical_to_components(vectors: np.ndarray, component_order: str = "xyz") -> np.ndarray:
+    """Convert physical x/y/z columns back to raw fort column order."""
+    order = _validate_component_order(component_order)
+    vectors = np.asarray(vectors, dtype=float)
+    result = np.empty_like(vectors)
+    for raw_col, label in enumerate(order):
+        result[:, raw_col] = vectors[:, _axis_index(label)]
+    return result
+
+
 def _frame_offset(frame_index: int, node_count: int) -> int:
     if frame_index < 0:
         raise ValueError("frame_index must be non-negative")
@@ -177,3 +213,14 @@ def _frame_offset(frame_index: int, node_count: int) -> int:
 def _validate_node_markers(records: np.ndarray, path: Path, frame_index: int) -> None:
     if not np.all(records["start"] == VECTOR_RECORD_BYTES) or not np.all(records["end"] == VECTOR_RECORD_BYTES):
         raise ValueError(f"Invalid node record markers in {path} frame {frame_index}")
+
+
+def _validate_component_order(component_order: str) -> str:
+    order = component_order.lower()
+    if sorted(order) != ["x", "y", "z"]:
+        raise ValueError("component_order must contain x, y, and z exactly once")
+    return order
+
+
+def _axis_index(axis: str) -> int:
+    return {"x": 0, "y": 1, "z": 2}[axis]

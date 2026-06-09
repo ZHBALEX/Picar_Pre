@@ -5,6 +5,13 @@ from pathlib import Path
 
 from geometry.unstructure_surface.surface import DEFAULT_CASE_SURFACE, read_surface
 
+from .analysis import (
+    analyze_centerline_motion,
+    analyze_centroid_motion,
+    format_centerline_report,
+    format_centroid_report,
+    write_centerline_csv,
+)
 from .fort import FortMotionInfo, fort_motion_info, format_motion_info, rotate_fort_motion
 from .visualize import plot_motion_2d, plot_motion_3d
 
@@ -87,6 +94,7 @@ class MotionProject:
         body_ids: list[int] | None = None,
         output_dir: str | Path | None = None,
         suffix: str = "_rotated",
+        component_order: str = "xyz",
     ) -> list[tuple[int, Path, FortMotionInfo]]:
         output_base = self.case_dir if output_dir is None else Path(output_dir)
         if not output_base.is_absolute():
@@ -97,7 +105,7 @@ class MotionProject:
             if not input_path.exists():
                 raise FileNotFoundError(f"Motion file not found for body {body_id}: {input_path}")
             output_path = output_base / f"{input_path.name}{suffix}"
-            info = rotate_fort_motion(input_path, output_path, rotation=rotation)
+            info = rotate_fort_motion(input_path, output_path, rotation=rotation, component_order=component_order)
             results.append((body_id, output_path, info))
         return results
 
@@ -109,6 +117,8 @@ class MotionProject:
         frame: int = -1,
         samples: int = 24,
         plane: str = "xy",
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
         save_path: str | Path | None = None,
         show: bool = True,
     ):
@@ -122,7 +132,106 @@ class MotionProject:
             raise FileNotFoundError(f"Motion file not found for body {body_id}: {fort_path}")
 
         if mode == "2d":
-            return plot_motion_2d(body, fort_path, frame=frame, samples=samples, plane=plane, save_path=save_path, show=show)
+            return plot_motion_2d(
+                body,
+                fort_path,
+                frame=frame,
+                samples=samples,
+                plane=plane,
+                component_order=component_order,
+                motion_mode=motion_mode,
+                save_path=save_path,
+                show=show,
+            )
         if mode == "3d":
-            return plot_motion_3d(body, fort_path, frame=frame, samples=samples, save_path=save_path, show=show)
+            return plot_motion_3d(
+                body,
+                fort_path,
+                frame=frame,
+                samples=samples,
+                component_order=component_order,
+                motion_mode=motion_mode,
+                save_path=save_path,
+                show=show,
+            )
         raise ValueError("mode must be '2d' or '3d'")
+
+    def analyze_centroid(
+        self,
+        body_id: int,
+        *,
+        stride: int = 1,
+        period: float = 1.0,
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
+    ) -> str:
+        bodies = read_surface(self.surface_path)
+        body = self._body_by_id(bodies, body_id)
+        analysis = analyze_centroid_motion(
+            body,
+            self.fort_path_for_body(body_id),
+            stride=stride,
+            period=period,
+            component_order=component_order,
+            motion_mode=motion_mode,
+        )
+        return "\n".join(
+            [
+                "Motion Analysis",
+                "===============",
+                f"Case dir : {self.case_dir}",
+                f"Body     : {body_id}",
+                f"Fort file: {self.fort_path_for_body(body_id)}",
+                "",
+                format_centroid_report(analysis, period=period),
+            ]
+        )
+
+    def analyze_centerline(
+        self,
+        body_id: int,
+        *,
+        axis: str = "x",
+        value_axes: tuple[str, ...] = ("y", "z"),
+        bins: int = 80,
+        stride: int = 1,
+        period: float = 1.0,
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
+        output: str | Path | None = None,
+    ) -> str:
+        bodies = read_surface(self.surface_path)
+        body = self._body_by_id(bodies, body_id)
+        analysis = analyze_centerline_motion(
+            body,
+            self.fort_path_for_body(body_id),
+            axis=axis,
+            value_axes=value_axes,
+            bins=bins,
+            stride=stride,
+            period=period,
+            component_order=component_order,
+            motion_mode=motion_mode,
+        )
+
+        lines = [
+            "Motion Analysis",
+            "===============",
+            f"Case dir : {self.case_dir}",
+            f"Body     : {body_id}",
+            f"Fort file: {self.fort_path_for_body(body_id)}",
+        ]
+        if output is not None:
+            out = Path(output)
+            if not out.is_absolute():
+                out = self.case_dir / out
+            write_centerline_csv(out, analysis, axis=axis)
+            lines.append(f"CSV      : {out}")
+
+        lines.extend(["", format_centerline_report(analysis, axis=axis, period=period)])
+        return "\n".join(lines)
+
+    def _body_by_id(self, bodies, body_id: int):
+        if body_id < 1 or body_id > len(bodies):
+            raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
+        return bodies[body_id - 1]
