@@ -1,159 +1,114 @@
 # Picar_Pre
 
-Picar_Pre is a preprocessing toolkit for preparing Picar solver input cases.
-The current focus is the solid/body pipeline:
+Picar_Pre is a Python preprocessing toolkit for preparing PICAR solver cases.
+It is organized around one target case directory: generate or convert geometry,
+write matching body metadata, generate structured grids, edit common solver
+inputs, inspect prescribed-motion files, and validate the case before running
+the solver.
 
-- generate or convert `unstruc_surface_in.dat`
-- keep `canonical_body_in.dat` consistent with the surface file
-- generate structured grid files
-- inspect or edit large prescribed-motion `fort.*` files separately
-- edit common `input.dat` parameters
-- validate the whole case directory before running the solver
+The toolkit currently focuses on the solid/body workflow:
 
-The workflow is case-directory based. This follows the same practical idea as
-pyvicar-style tools: choose one target case directory, then run generation,
-editing, visualization, and validation commands against that directory.
+- create `unstruc_surface_in.dat` from parametric shapes, STL files, transforms,
+  or combined surface files
+- keep `canonical_body_in.dat` synchronized with the surface body counts
+- generate and inspect `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`
+- edit common `input.dat` values without rewriting the whole file format
+- inspect, rotate, visualize, and analyze large prescribed-motion `fort.*` files
+- validate a complete case directory
 
 ## Repository Layout
 
 ```text
+case_editor/
+  Case-level workflow for input.dat, canonical bodies, grids, surfaces, and validation.
+
+geometry/unstructure_surface/
+  Boundary-surface pipeline for unstruc_surface_in.dat, including STL conversion,
+  parametric body generation, transforms, visualization, and a static browser editor.
+
+mesh/
+  Structured Cartesian grid generation, mesh-input optimization, inspection, and
+  1D/2D/3D grid visualization.
+
+motion/
+  Prescribed-motion fort.* tools for inspection, rotation, visualization, and
+  harmonic motion analysis.
+
 example/
-  run_case/                         Existing solver input example
-
-geometry/
-  unstructure_surface/              Surface generation, STL conversion, transforms, visualization
-    run_surface_tools.py            CLI for unstruc_surface_in.dat operations
-    surface.py                      Surface read/write/validation
-    modeling.py                     Parametric 2D/3D body generation
-    stl.py                          STL conversion helpers
-    visualize.py                    Optional visualization helpers
-    editor/                         Browser-based parametric editor
-
-case_editor/                        Full case input editing workflow
-  run_case_editor.py                CLI for case-level operations
-  case_project.py                   CaseProject high-level object
-  input_editor.py                   input.dat editor
-  canonical_body_editor.py          canonical_body_in.dat editor
-  mesh_editor.py                    x/y/z grid editor
-
-motion/                             Large fort.* prescribed-motion tools
-  run_motion_tools.py               CLI for inspecting and rotating motion files
-  fort.py                           Binary fort.* read/write helpers
+  Example cases and the one-file 2D cylinder case builder.
 ```
 
-## Main Concepts
+Detailed module documentation:
+
+- [case_editor/README.md](case_editor/README.md)
+- [geometry/unstructure_surface/README.md](geometry/unstructure_surface/README.md)
+- [mesh/README.md](mesh/README.md)
+- [motion/README.md](motion/README.md)
+
+## Main Files
 
 ### `unstruc_surface_in.dat`
 
-This file stores only body boundary data.
-
-For solver-style 2D bodies:
-
-- the body is stored as a very thin side-wall surface
-- nodes are boundary surface points on several spanwise layers
-- elements are boundary surface triangles
-- no interior or volume mesh is written
-
-A flat boundary-only curve with `elems = 0` is still useful for quick sketches,
-but the provided `example/run_case_2D` uses the thin side-wall format.
-
-For 3D bodies:
-
-- nodes are boundary surface points
-- elements are boundary surface triangles
-- no volume mesh is written
+Stores body boundary data only. For solver-style 2D bodies, this toolkit writes
+a very thin side-wall surface: several spanwise layers of boundary points plus
+triangle elements. Flat boundary curves with `elem_count = 0` are also supported
+for sketches and previews. For 3D bodies, the file stores boundary surface
+points and triangle elements, not a volume mesh.
 
 ### `canonical_body_in.dat`
 
-This file stores body control/count information. In this toolkit, it can be
-generated directly from `unstruc_surface_in.dat`, so a separate canonical body
-geometry file is not required.
+Stores body control/count information. In this toolkit it can be generated from
+the current `unstruc_surface_in.dat`, so a separate canonical geometry source is
+not required for the supported workflow.
 
 ### `input.dat`
 
-The case editor updates common values while preserving the original line-based
-format as much as possible:
+Stores solver and mesh parameters. The case editor updates common values such as
+grid counts, domain lengths, initial velocity, Reynolds number, time step, and
+internal-boundary settings while preserving the line-based format as much as
+possible.
 
-- grid counts
-- domain lengths
-- initial velocity
-- Reynolds number and time step
-- internal boundary settings
+### `xgrid.dat`, `ygrid.dat`, `zgrid.dat`
 
-### `fort.*` prescribed motion
+Structured Cartesian grid coordinate files. The `mesh/` tools can generate them
+from compact mesh parameters, inspect multigrid-friendly count properties, and
+visualize grid spacing before or after generation.
 
-Large `fort.*` files store prescribed relative surface motion. These tools live
-under `motion/` so static surface edits do not automatically rewrite hundreds of
-MB of binary motion data. Translation of `unstruc_surface_in.dat` does not need
-motion edits, but rotation should rotate the stored relative vectors separately.
+### `fort.*`
 
-## Quick Start: Build a 2D Cylinder Case
+Large prescribed-motion files. These live in a separate `motion/` workflow
+because they can be hundreds of MB and should not be rewritten during ordinary
+surface edits. Translation of a static surface does not require motion edits,
+but rotation should rotate the stored motion vectors too.
 
-Run all commands from the repository root.
+## Quick Start
 
-### Easiest: Use the One-File Example
+Run commands from the repository root.
 
-Open and edit:
-
-[example/build_2d_cylinder_case.py](example/build_2d_cylinder_case.py)
-
-The main parameters are kept together:
-
-```python
-config = CaseBuildConfig(
-    case_dir="example/generated_circle2d_case",
-    surface=SurfaceBuildConfig(
-        kind="circle",
-        params={
-            "radius": 0.25,
-            "n": 600,
-            "layers": 3,
-        },
-        center=(19.2, 10.0, 0.005),
-        thickness=0.01,
-    ),
-    mesh=MeshBuildConfig(
-        nx=121,
-        ny=81,
-        nz=1,
-        xout=24.0,
-        yout=20.0,
-        zout=0.0,
-    ),
-    input=InputBuildConfig(
-        u=1.0,
-        v=0.0,
-        w=0.0,
-        re=1000.0,
-        dt=0.001,
-    ),
-)
-```
-
-Run:
+The easiest complete workflow is the 2D cylinder case builder:
 
 ```powershell
 python example/build_2d_cylinder_case.py
 ```
 
-This one script does the full workflow:
+Edit the configuration near the top of
+[example/build_2d_cylinder_case.py](example/build_2d_cylinder_case.py) to change
+the output directory, geometry, mesh, and flow parameters. The script:
 
-- copy the template case
-- generate `unstruc_surface_in.dat`
-- sync `canonical_body_in.dat`
-- generate `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`
-- update common `input.dat` values
-- validate the final case
+- copies a template case
+- generates `unstruc_surface_in.dat`
+- syncs `canonical_body_in.dat`
+- generates `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`
+- updates common `input.dat` values
+- validates the final case
 
-The generated case is:
+The default generated case is:
 
 ```text
 example/generated_circle2d_case
 ```
 
-### Python One-Function API
-
-For the default 2D cylinder:
+## One-Function Python Workflow
 
 ```python
 from case_editor import build_2d_cylinder_case
@@ -189,9 +144,9 @@ case = build_case(config)
 print(case.report())
 ```
 
-### Manual Command-Line Workflow
+## Manual Case Workflow
 
-### 1. Initialize a Case Directory
+### 1. Initialize a case directory
 
 ```powershell
 python case_editor/run_case_editor.py --case-dir case_editor/demo_case init
@@ -200,170 +155,108 @@ python case_editor/run_case_editor.py --case-dir case_editor/demo_case init
 This copies the small files from `example/run_case`. Large `fort.*` files are
 skipped by default.
 
-### 2. Generate a Boundary-Only 2D Cylinder
+### 2. Generate or convert a surface
+
+Generate a solver-style thin 2D cylinder:
 
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case generate circle --param radius=0.25 --param n=600 --param layers=3 --center 19.2 10 0.005 --thickness 0.01
 ```
 
-Expected surface:
-
-```text
-nodes = 1800
-elems = 2400
-center = (19.2, 10.0, 0.005)
-radius = 0.25
-```
-
-### 3. Sync `canonical_body_in.dat`
-
-```powershell
-python case_editor/run_case_editor.py --case-dir case_editor/demo_case canonical --nbody-solid 1 --nbody-membrane 0 --motion-type 3 --zone-max 1
-```
-
-This reads the current `unstruc_surface_in.dat` and writes matching body counts.
-
-### 4. Generate Mesh Files
-
-```powershell
-python case_editor/run_case_editor.py --case-dir case_editor/demo_case mesh --nx 121 --ny 81 --nz 1 --xout 24 --yout 20 --zout 0
-```
-
-This writes:
-
-- `xgrid.dat`
-- `ygrid.dat`
-- `zgrid.dat`
-
-It also updates the grid counts and domain lengths in `input.dat`.
-
-### 5. Edit Common Solver Input Values
-
-```powershell
-python case_editor/run_case_editor.py --case-dir case_editor/demo_case input --u 1.0 --v 0 --w 0 --re 1000 --dt 0.001 --ib-present 1 --body-type 2 --formulation 1
-```
-
-### 6. Validate the Case
-
-```powershell
-python case_editor/run_case_editor.py --case-dir case_editor/demo_case validate
-```
-
-Expected output:
-
-```text
-Case Validation
-===============
-Status: PASS
-```
-
-For a full summary:
-
-```powershell
-python case_editor/run_case_editor.py --case-dir case_editor/demo_case report
-```
-
-## Surface Tool Examples
-
-### Inspect a Surface
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case inspect --roundtrip
-```
-
-`--roundtrip` writes the surface to a temporary file, reads it back, and checks
-that the arrays are unchanged.
-
-### Visualize a 2D Boundary Surface
-
-For 2D `unstruc_surface_in.dat`, use `body2d`. Solver-style 2D cases are thin
-side-wall surfaces; `body2d` projects the surface to XY. If a quick sketch has
-`elems = 0`, it draws the closed boundary curve from node order.
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir example/generated_circle2d_case view body2d --body 1 --show-nodes
-```
-
-Save the figure to a file:
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir example/generated_circle2d_case view body2d --body 1 --show-nodes --save example/generated_circle2d_case/body2d_preview.png
-```
-
-If `view mesh` is used on a 2D boundary-only surface, the tool automatically
-falls back to the 2D boundary view.
-
-### Visualize a 3D Surface Mesh
-
-For STL-derived or extruded 3D surfaces with triangle elements:
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir example/generated_circle2d_case view mesh
-```
-
-### Generate a Thin 3D Cylinder Side Wall
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case generate circle --param radius=0.25 --param n=96 --center 19.2 10 0 --thickness 0.1
-```
-
-Expected surface:
-
-```text
-nodes = 192
-elems = 192
-```
-
-### Generate a NACA Airfoil Boundary
-
-```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case generate naca --param code=0012 --param chord=1.0 --param n=100 --center 6.8 3.0 0
-```
-
-### Convert STL Files in a Case Directory
+Convert STL files already inside the case directory:
 
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case convert-stl
 ```
 
-If no STL paths are provided, all `*.stl` files in the case directory are used.
-
-### Combine Several Surface Files
-
-Use `combine` when you already have separate surface files and want one
-multi-body `unstruc_surface_in.dat`.
+Combine separate surface files into one multi-body surface:
 
 ```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case combine path/to/cylinder/unstruc_surface_in.dat path/to/foil/unstruc_surface_in.dat
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case combine path/to/body1/unstruc_surface_in.dat path/to/body2/unstruc_surface_in.dat
 ```
 
-The output is:
-
-```text
-case_editor/demo_case/unstruc_surface_in.dat
-```
-
-Each input body remains a separate body block. For example, cylinder becomes
-body 1 and foil becomes body 2.
-
-Append another surface to the current case surface:
+### 3. Sync canonical body metadata
 
 ```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case combine path/to/another_body/unstruc_surface_in.dat --append
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case canonical --nbody-solid 1 --nbody-membrane 0 --motion-type 3 --zone-max 1
 ```
 
-### Transform a Surface
+For multi-body surfaces, omit `--nbody-solid` to use the number of bodies in
+`unstruc_surface_in.dat`.
+
+### 4. Generate grid files
+
+Case-level uniform grid generation:
 
 ```powershell
-python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case transform --rotate 0 0 10 --translate 0.1 0 0
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case mesh --nx 121 --ny 81 --nz 1 --xout 24 --yout 20 --zout 0
 ```
 
-## Browser Editor
+Mesh-package generation from a compact mesh input:
 
-The static editor can generate simple parametric bodies and export surface/STL
-files.
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples generate
+```
 
-Start a local server from the repository root:
+Generate with multigrid-friendly dense-length optimization:
+
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples generate --optimize
+```
+
+Write an optimized mesh input file without overwriting the original:
+
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples optimize-input
+```
+
+The Excel-style preferred-count table method is available with:
+
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples optimize-input --method table --ideal-delta 0.0033
+```
+
+### 5. Edit common solver input values
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case input --u 1.0 --v 0 --w 0 --re 1000 --dt 0.001 --ib-present 1 --body-type 2 --formulation 1
+```
+
+### 6. Validate or report the case
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case validate
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case report
+```
+
+## Surface Tools
+
+Inspect a surface and verify read/write consistency:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case inspect --roundtrip
+```
+
+Visualize a solver-style 2D body by projecting the thin side-wall surface to XY:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case view body2d --body 1 --show-nodes
+```
+
+Save the preview:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case view body2d --body 1 --show-nodes --save body2d_preview.png
+```
+
+Transform existing bodies:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case transform --body 1 --rotate 0 0 10 --translate 0.1 0 0
+```
+
+The surface browser editor can generate simple parametric bodies and export
+surface/STL files:
 
 ```powershell
 python -m http.server 8765
@@ -375,41 +268,83 @@ Open:
 http://localhost:8765/geometry/unstructure_surface/editor/
 ```
 
-The editor supports:
+## Mesh Tools
 
-- 2D circle, ellipse, rectangle, and NACA boundaries
-- optional thin 3D side-wall extrusion
-- Three.js orbit preview when CDN access is available
-- closed line rendering for flat boundaries
-- translucent mesh and edge rendering for thin side-wall surfaces
-- left-drag rotate, mouse wheel zoom, and right-drag pan
-- `ISO`, `Top`, and `Fit` view buttons
-- export of `unstruc_surface_in.dat`
-- export of STL for 3D side-wall models
-- copying an equivalent CLI command
+Inspect existing grid files:
 
-Default editor settings generate a solver-style 2D cylinder:
-
-```text
-Shape     : Circle / 2D cylinder
-Radius    : 0.25
-Points    : 600
-Center    : 19.2, 10.0, 0.005
-3D        : on
-Thickness : 0.01
-Layers    : 3
+```powershell
+python -m mesh.run_mesh_tools --case-dir example/run_case inspect
 ```
 
-Expected output:
+Visualize generated grid files:
 
-```text
-nodes = 1800
-elems = 2400
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples view --mode 2d --plane xy --save mesh/examples/grid_preview.png --no-show
 ```
 
-## Python API Examples
+Visualize 1D spacing curves:
 
-### Case-Level Workflow
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples view --mode 1d --axis all --save mesh/examples/spacing.png --no-show
+```
+
+Preview a mesh input before grid files exist:
+
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples view --source input --input input.dat --save input_preview.png --no-show
+```
+
+The mesh browser editor creates mesh-generator `input.dat` files:
+
+```powershell
+python -m http.server 8765
+```
+
+Open:
+
+```text
+http://localhost:8765/mesh/editor/
+```
+
+Use `python -m mesh.run_mesh_tools --case-dir path/to/case generate` afterward
+to create `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
+
+## Motion Tools
+
+Inspect prescribed-motion files and compare node counts with the surface file:
+
+```powershell
+python motion/run_motion_tools.py --case-dir example/run_case inspect
+python motion/run_motion_tools.py --case-dir example/run_case_2D inspect --body 1
+```
+
+Rotate stored motion vectors after rotating a surface:
+
+```powershell
+python motion/run_motion_tools.py --case-dir example/run_case rotate --rotate 0 0 10 --body 1 --output-dir motion_outputs
+```
+
+Visualize motion envelopes:
+
+```powershell
+python motion/run_motion_tools.py --case-dir example/run_case_2D view 2d --body 1 --frame 240 --samples 18 --save body1_motion.png --no-show
+python motion/run_motion_tools.py --case-dir example/run_case view 3d --body 4 --frame 240 --samples 8 --save body4_motion.png --no-show
+```
+
+Fit harmonic motion equations:
+
+```powershell
+python motion/run_motion_tools.py --case-dir example/run_case_2D analyze centroid --body 1
+python motion/run_motion_tools.py --case-dir example/run_case_2D analyze centerline --body 1 --axis x --bins 60 --output centerline_body1.csv
+```
+
+By default, motion values are interpreted as physical `xyz` marker velocities
+and integrated from `unstruc_surface_in.dat`. Use `--component-order` and
+`--motion-mode` for files with different conventions.
+
+## Python APIs
+
+Case-level workflow:
 
 ```python
 from case_editor import CaseProject
@@ -428,7 +363,7 @@ editor.write()
 print(case.report())
 ```
 
-### Surface-Level Workflow
+Surface workflow:
 
 ```python
 from geometry.unstructure_surface import SurfaceProject
@@ -447,15 +382,25 @@ print(out)
 print(project.report(bodies=bodies))
 ```
 
-## Testing Commands
+Mesh workflow:
+
+```python
+from mesh import MeshProject
+
+project = MeshProject("mesh/examples")
+mesh, optimization_report = project.generate(optimize=True)
+print(project.report())
+```
+
+## Testing and Checks
 
 Compile the current Python tools:
 
 ```powershell
-python -m py_compile case_editor/__init__.py case_editor/input_editor.py case_editor/canonical_body_editor.py case_editor/mesh_editor.py case_editor/case_project.py case_editor/workflow.py case_editor/run_case_editor.py example/build_2d_cylinder_case.py geometry/unstructure_surface/__init__.py geometry/unstructure_surface/surface.py geometry/unstructure_surface/project.py geometry/unstructure_surface/modeling.py geometry/unstructure_surface/stl.py geometry/unstructure_surface/visualize.py geometry/unstructure_surface/run_surface_tools.py geometry/transfer_stlToUnstr.py
+python -m py_compile case_editor/__init__.py case_editor/input_editor.py case_editor/canonical_body_editor.py case_editor/mesh_editor.py case_editor/case_project.py case_editor/workflow.py case_editor/run_case_editor.py example/build_2d_cylinder_case.py geometry/unstructure_surface/__init__.py geometry/unstructure_surface/surface.py geometry/unstructure_surface/project.py geometry/unstructure_surface/modeling.py geometry/unstructure_surface/stl.py geometry/unstructure_surface/visualize.py geometry/unstructure_surface/run_surface_tools.py geometry/transfer_stlToUnstr.py mesh/__init__.py mesh/io.py mesh/generation.py mesh/optimization.py mesh/project.py mesh/visualize.py mesh/run_mesh_tools.py motion/__init__.py motion/fort.py motion/project.py motion/visualize.py motion/analysis.py motion/run_motion_tools.py
 ```
 
-Validate the generated demo case:
+Validate a generated case:
 
 ```powershell
 python case_editor/run_case_editor.py --case-dir case_editor/demo_case validate
@@ -467,15 +412,23 @@ Check surface read/write consistency:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case inspect --roundtrip
 ```
 
+Inspect mesh counts and spacing:
+
+```powershell
+python -m mesh.run_mesh_tools --case-dir mesh/examples inspect
+```
+
 ## Notes
 
-- Command-line body ids are 1-based.
-- Python body lists are 0-based.
+- Command-line body ids are 1-based; Python body lists are 0-based.
 - `body_type = 2` means canonical body in the current example format.
 - Solver-style 2D examples use thin side-wall boundary surfaces with triangle
   elements.
 - Flat boundary curves with zero elements are supported for sketches and quick
   previews.
 - STL conversion creates 3D boundary surface triangles.
-- If a body node order or node count changes, any external files that refer to
-  body node ids should be regenerated or checked.
+- Mesh count fields are treated as interval counts; written grid files contain
+  `total intervals + 1` coordinate nodes.
+- If body node order, node count, or topology changes, any external files that
+  refer to body node ids, including matching `fort.*` files, should be checked
+  or regenerated.
