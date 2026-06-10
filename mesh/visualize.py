@@ -5,13 +5,14 @@ from pathlib import Path
 
 import numpy as np
 
-from .generation import generate_mesh_from_input
-from .io import MeshAxis, MeshConfig, read_grid_axis, read_mesh
+from .generation import generate_mesh
+from .io import MeshAxis, MeshConfig, read_grid_axis, read_mesh, read_mesh_input
 
 
 def plot_plane_grid(
     mesh: MeshConfig,
     plane: str = "xy",
+    dense_box: tuple[float, float, float, float] | None = None,
     save_path: str | Path | None = None,
     show: bool = True,
     dpi: int = 150,
@@ -22,6 +23,7 @@ def plot_plane_grid(
     _prepare_matplotlib(show)
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
+    from matplotlib.patches import Rectangle
 
     axis_a, axis_b = _axes_for_plane(mesh, plane)
     a_values = axis_a.values
@@ -35,6 +37,18 @@ def plot_plane_grid(
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.add_collection(LineCollection(horizontal, linewidths=line_width, alpha=alpha))
     ax.add_collection(LineCollection(vertical, linewidths=line_width, alpha=alpha))
+    if dense_box is not None:
+        ax.add_patch(
+            Rectangle(
+                (dense_box[0], dense_box[1]),
+                dense_box[2],
+                dense_box[3],
+                fill=False,
+                edgecolor="#C0392B",
+                linewidth=2.0,
+                zorder=5,
+            )
+        )
     ax.set_xlim(a_min, a_max)
     ax.set_ylim(b_min, b_max)
     ax.set_aspect("equal", adjustable="box")
@@ -50,6 +64,7 @@ def plot_plane_grid(
         f"{axis_b.name}_nodes": b_values,
         "domain": (a_min, b_min, a_max, b_max),
         "plane": plane.lower(),
+        "dense_box": dense_box,
     }
 
 
@@ -149,11 +164,14 @@ def plot_grid_from_input(
     max_lines_per_axis: int = 24,
 ) -> dict[str, object]:
     """Generate and visualize a mesh from mesh parameters."""
+    params = read_mesh_input(input_path, input_format=input_format)
+    mesh = generate_mesh(params, repair_degenerate=True)
     return plot_mesh(
-        generate_mesh_from_input(input_path, input_format=input_format, repair_degenerate=True),
+        mesh,
         mode=mode,
         plane=plane,
         axis=axis,
+        dense_box=_dense_box_for_plane(params, plane) if mode.lower() == "2d" else None,
         save_path=save_path,
         show=show,
         dpi=dpi,
@@ -207,6 +225,7 @@ def plot_mesh(
     mode: str = "2d",
     plane: str = "xy",
     axis: str = "all",
+    dense_box: tuple[float, float, float, float] | None = None,
     save_path: str | Path | None = None,
     show: bool = True,
     dpi: int = 150,
@@ -217,7 +236,7 @@ def plot_mesh(
     if mode == "1d":
         return plot_axis_spacing(mesh, axis=axis, save_path=save_path, show=show, dpi=dpi)
     if mode == "2d":
-        return plot_plane_grid(mesh, plane=plane, save_path=save_path, show=show, dpi=dpi)
+        return plot_plane_grid(mesh, plane=plane, dense_box=dense_box, save_path=save_path, show=show, dpi=dpi)
     if mode == "3d":
         return plot_3d_grid(mesh, save_path=save_path, show=show, dpi=dpi, max_lines_per_axis=max_lines_per_axis)
     raise ValueError("mode must be one of: 1d, 2d, 3d")
@@ -233,6 +252,29 @@ def _axes_for_plane(mesh: MeshConfig, plane: str) -> tuple[MeshAxis, MeshAxis]:
     if first is None or second is None:
         raise ValueError(f"{plane} view requires {plane[0]}grid.dat and {plane[1]}grid.dat")
     return first, second
+
+
+def _dense_box_for_plane(params: dict[str, object], plane: str) -> tuple[float, float, float, float] | None:
+    """Return a matplotlib rectangle tuple for the dense region on a 2D plane."""
+    plane = plane.lower()
+    if plane not in {"xy", "xz", "yz"}:
+        return None
+
+    starts: dict[str, float] = {}
+    lengths: dict[str, float] = {}
+    for axis in plane:
+        center_key = f"{axis}_center_dense"
+        length_key = f"L{axis}_dense"
+        if center_key not in params or length_key not in params:
+            return None
+        length = float(params[length_key])
+        if length <= 0.0:
+            return None
+        starts[axis] = float(params[center_key]) - 0.5 * length
+        lengths[axis] = length
+
+    first, second = plane[0], plane[1]
+    return starts[first], starts[second], lengths[first], lengths[second]
 
 
 def _selected_axes(mesh: MeshConfig, axis: str) -> list[MeshAxis]:

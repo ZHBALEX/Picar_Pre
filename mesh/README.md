@@ -108,6 +108,9 @@ python -m mesh.run_mesh_tools --case-dir path/to/case view --mode 1d --axis all 
 python -m mesh.run_mesh_tools --case-dir path/to/case view --mode 3d --max-lines 24
 ```
 
+When visualizing from an input file, 2D views outline the dense mesh region with
+a red box.
+
 ## Count semantics
 
 The mesh generator treats `Nx_dense`, `n_left_stretch`, and related count fields
