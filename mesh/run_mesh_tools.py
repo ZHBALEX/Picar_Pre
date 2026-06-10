@@ -87,8 +87,20 @@ def parse_args() -> argparse.Namespace:
     )
     add_ideal_delta_args(optimize)
 
-    view = subparsers.add_parser("view", help="Plot the x-y grid.")
-    view.add_argument("--from-input", action="store_true", help="Generate plot directly from mesh input parameters.")
+    view = subparsers.add_parser("view", help="Visualize grid files or mesh input in 1D, 2D, or 3D.")
+    view.add_argument("--source", choices=["auto", "grids", "input"], default="auto", help="Visualization source. Default: auto.")
+    view.add_argument("--from-input", action="store_true", help="Compatibility alias for --source input.")
+    view.add_argument("--input", "--input-file", dest="input_file", type=Path, default=None, help="Mesh input file to preview directly.")
+    view.add_argument(
+        "--input-format",
+        choices=["auto", "canonical", "twolayer2d"],
+        default="auto",
+        help="Mesh input format for --source input.",
+    )
+    view.add_argument("--mode", choices=["1d", "2d", "3d"], default="2d", help="Visualization mode. Default: 2d.")
+    view.add_argument("--plane", choices=["xy", "xz", "yz"], default="xy", help="2D plane for mode=2d. Default: xy.")
+    view.add_argument("--axis", choices=["x", "y", "z", "all"], default="all", help="Axis for mode=1d. Default: all.")
+    view.add_argument("--max-lines", type=int, default=24, help="Maximum sampled lines per axis for mode=3d.")
     view.add_argument("--save", type=Path, default=None, help="Save image path.")
     view.add_argument("--no-show", action="store_true", help="Do not open an interactive plot window.")
 
@@ -142,15 +154,37 @@ def main() -> None:
         print("Status : DONE")
 
     elif args.command == "view":
-        if args.from_input:
-            plot_grid_from_input(project.input_path, save_path=args.save, show=not args.no_show)
+        source = "input" if args.from_input or args.input_file is not None else args.source
+        if source == "auto":
+            source = "grids"
+        if source == "input":
+            input_path = args.input_file
+            if input_path is None:
+                input_path = project.input_path
+            elif not input_path.is_absolute():
+                input_path = project.case_dir / input_path
+            plot_grid_from_input(
+                input_path,
+                input_format=args.input_format,
+                mode=args.mode,
+                plane=args.plane,
+                axis=args.axis,
+                save_path=args.save,
+                show=not args.no_show,
+                max_lines_per_axis=args.max_lines,
+            )
         else:
+            z_path = project.case_dir / "zgrid.dat"
             plot_grid_from_files(
                 project.case_dir / "xgrid.dat",
                 project.case_dir / "ygrid.dat",
-                project.case_dir / "zgrid.dat",
+                z_path if z_path.exists() else None,
+                mode=args.mode,
+                plane=args.plane,
+                axis=args.axis,
                 save_path=args.save,
                 show=not args.no_show,
+                max_lines_per_axis=args.max_lines,
             )
 
 

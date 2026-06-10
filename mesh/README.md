@@ -9,7 +9,8 @@ Run the included basic example:
 ```powershell
 python -m mesh.run_mesh_tools --case-dir mesh/examples generate
 python -m mesh.run_mesh_tools --case-dir mesh/examples inspect
-python -m mesh.run_mesh_tools --case-dir mesh/examples view --save mesh/examples/grid_preview.png --no-show
+python -m mesh.run_mesh_tools --case-dir mesh/examples view --mode 2d --plane xy --save mesh/examples/grid_preview.png --no-show
+python -m mesh.run_mesh_tools --case-dir mesh/examples view --mode 1d --axis all --save mesh/examples/spacing.png --no-show
 ```
 
 Open the visual input designer:
@@ -85,6 +86,27 @@ print(project.report())
 ```
 
 The supported entry points are the package API and `python -m mesh.run_mesh_tools`.
+
+## Visualization
+
+Grid axes are decoupled, so `view` supports separate modes:
+
+```powershell
+# From generated x/y/z grid files. zgrid.dat is not required for xy.
+python -m mesh.run_mesh_tools --case-dir path/to/case view --save grid_xy.png --no-show
+
+# From a mesh-generation input file, before xgrid/ygrid/zgrid exist.
+python -m mesh.run_mesh_tools --case-dir path/to/case view --input input_mesh_twolayers.dat --save input_preview.png --no-show
+
+# Other planes require the corresponding axis files.
+python -m mesh.run_mesh_tools --case-dir path/to/case view --plane yz --save grid_yz.png --no-show
+
+# 1D spacing curves for grid-size changes.
+python -m mesh.run_mesh_tools --case-dir path/to/case view --mode 1d --axis all --save spacing.png --no-show
+
+# 3D wireframe. Requires xgrid.dat, ygrid.dat, and zgrid.dat.
+python -m mesh.run_mesh_tools --case-dir path/to/case view --mode 3d --max-lines 24
+```
 
 ## Count semantics
 

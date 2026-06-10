@@ -54,6 +54,37 @@ MESH_INPUT_FIELDS: tuple[tuple[str, type, str], ...] = (
     ("flag_preplot", bool, "preplot"),
 )
 
+TWOLAYER_2D_INPUT_FIELDS: tuple[tuple[str, type, str], ...] = (
+    ("scale_ref", float, "primary length scale"),
+    ("Lx", float, "domain length in x"),
+    ("Ly", float, "domain length in y"),
+    ("x_center_dense", float, "dense-region center in x"),
+    ("y_center_dense", float, "dense-region center in y"),
+    ("Lx_dense", float, "dense-region length in x"),
+    ("Ly_dense", float, "dense-region length in y"),
+    ("Nx_dense", int, "dense-region interval count in x"),
+    ("Ny_dense", int, "dense-region interval count in y"),
+    ("len_left", float, "left uniform layer length near dense region"),
+    ("len_right", float, "right uniform layer length near dense region"),
+    ("len_bottom", float, "bottom uniform layer length near dense region"),
+    ("len_top", float, "top uniform layer length near dense region"),
+    ("n_left_stretch", int, "left stretched interval count"),
+    ("n_left_uniform", int, "left uniform interval count"),
+    ("n_right_uniform", int, "right uniform interval count"),
+    ("n_right_stretch", int, "right stretched interval count"),
+    ("n_bottom_stretch", int, "bottom stretched interval count"),
+    ("n_bottom_uniform", int, "bottom uniform interval count"),
+    ("n_top_uniform", int, "top uniform interval count"),
+    ("n_top_stretch", int, "top stretched interval count"),
+    ("r_left", float, "left stretching ratio"),
+    ("r_right", float, "right stretching ratio"),
+    ("r_bottom", float, "bottom stretching ratio"),
+    ("r_top", float, "top stretching ratio"),
+    ("relax", float, "relaxation factor"),
+    ("flag_plot", bool, "generate plot"),
+    ("flag_preplot", bool, "preplot"),
+)
+
 
 @dataclass
 class MeshAxis:
@@ -108,8 +139,14 @@ def parse_scalar(value: str) -> object:
         return value
 
 
-def read_mesh_input(path: str | Path) -> dict[str, object]:
-    """Read the compact mesh-parameter input.dat used by the mesh generator."""
+def read_mesh_input(path: str | Path, input_format: str = "auto") -> dict[str, object]:
+    """Read mesh-generator input parameters.
+
+    Supported formats:
+    - auto: infer canonical 3D/2D-via-z fields or compact twolayer 2D fields
+    - canonical: current full field order
+    - twolayer2d: 2D input_mesh_twolayers-style field order
+    """
     path = Path(path)
     values: list[object] = []
     for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -121,12 +158,13 @@ def read_mesh_input(path: str | Path) -> dict[str, object]:
             raise ValueError(f"Expected one value before comment at {path}:{len(values) + 1}, got: {line}")
         values.append(parse_scalar(parts[0]))
 
-    expected = len(MESH_INPUT_FIELDS)
+    fields = _fields_for_input(values, input_format, path)
+    expected = len(fields)
     if len(values) < expected:
         raise ValueError(f"Mesh input has {len(values)} values, expected {expected}: {path}")
 
     params: dict[str, object] = {}
-    for idx, (key, kind, _) in enumerate(MESH_INPUT_FIELDS):
+    for idx, (key, kind, _) in enumerate(fields):
         value = values[idx]
         if kind is bool:
             params[key] = bool(value)
@@ -137,7 +175,28 @@ def read_mesh_input(path: str | Path) -> dict[str, object]:
         else:
             params[key] = value
 
+    if fields is TWOLAYER_2D_INPUT_FIELDS:
+        params["input_format"] = "twolayer2d"
+    else:
+        params["input_format"] = "canonical"
     return params
+
+
+def _fields_for_input(values: list[object], input_format: str, path: Path) -> tuple[tuple[str, type, str], ...]:
+    if input_format == "canonical":
+        return MESH_INPUT_FIELDS
+    if input_format in {"twolayer2d", "2d"}:
+        return TWOLAYER_2D_INPUT_FIELDS
+    if input_format != "auto":
+        raise ValueError("input_format must be auto, canonical, or twolayer2d")
+    if len(values) >= len(MESH_INPUT_FIELDS):
+        return MESH_INPUT_FIELDS
+    if len(values) >= len(TWOLAYER_2D_INPUT_FIELDS):
+        return TWOLAYER_2D_INPUT_FIELDS
+    raise ValueError(
+        f"Cannot infer mesh input format for {path}: found {len(values)} values, "
+        f"expected at least {len(TWOLAYER_2D_INPUT_FIELDS)} for twolayer2d"
+    )
 
 
 def write_mesh_input(path: str | Path, params: dict[str, object]) -> Path:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import warnings
 
 import numpy as np
 
@@ -36,6 +37,7 @@ def make_axis_nodes(
     right_stretch_count: int = 0,
     left_ratio: float = 1.0,
     right_ratio: float = 1.0,
+    repair_degenerate: bool = False,
 ) -> np.ndarray:
     """Generate one monotone coordinate axis from dense-region parameters.
 
@@ -96,14 +98,28 @@ def make_axis_nodes(
     nodes = np.concatenate([[0.0], np.cumsum(sizes)])
     nodes[-1] = length
     if np.any(np.diff(nodes) <= 0):
-        raise ValueError("Generated axis is not strictly increasing; check lengths and interval counts")
+        if repair_degenerate:
+            warnings.warn(
+                "Some requested intervals were too small for floating-point coordinates; "
+                "the preview repaired duplicate nodes with nextafter(). "
+                "Consider reducing the stretching aggressiveness or interval count before generating production grids.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            nodes = _repair_strictly_increasing(nodes, length)
+        else:
+            min_positive = float(np.min(sizes[sizes > 0])) if np.any(sizes > 0) else 0.0
+            raise ValueError(
+                "Generated axis is not strictly increasing. "
+                f"The smallest requested interval is {min_positive:.3e}; "
+                "this usually means a stretching ratio is too aggressive for the interval count."
+            )
     return nodes
 
 
-def generate_mesh(params: dict[str, object]) -> MeshConfig:
+def generate_mesh(params: dict[str, object], repair_degenerate: bool = False) -> MeshConfig:
     """Generate x/y/z axes from a mesh-parameter dictionary."""
-    return MeshConfig(
-        x=MeshAxis(
+    x_axis = MeshAxis(
             "x",
             make_axis_nodes(
                 params["Lx"],
@@ -118,9 +134,10 @@ def generate_mesh(params: dict[str, object]) -> MeshConfig:
                 params["n_right_stretch"],
                 params["r_left"],
                 params["r_right"],
+                repair_degenerate=repair_degenerate,
             ),
-        ),
-        y=MeshAxis(
+        )
+    y_axis = MeshAxis(
             "y",
             make_axis_nodes(
                 params["Ly"],
@@ -135,9 +152,12 @@ def generate_mesh(params: dict[str, object]) -> MeshConfig:
                 params["n_top_stretch"],
                 params["r_bottom"],
                 params["r_top"],
+                repair_degenerate=repair_degenerate,
             ),
-        ),
-        z=MeshAxis(
+        )
+    z_axis = None
+    if _has_z_params(params):
+        z_axis = MeshAxis(
             "z",
             make_axis_nodes(
                 params["Lz"],
@@ -152,14 +172,15 @@ def generate_mesh(params: dict[str, object]) -> MeshConfig:
                 params["n_back_stretch"],
                 params["r_front"],
                 params["r_back"],
+                repair_degenerate=repair_degenerate,
             ),
-        ),
-    )
+        )
+    return MeshConfig(x=x_axis, y=y_axis, z=z_axis)
 
 
-def generate_mesh_from_input(path: str | Path) -> MeshConfig:
+def generate_mesh_from_input(path: str | Path, input_format: str = "auto", repair_degenerate: bool = False) -> MeshConfig:
     """Read mesh parameters and generate x/y/z axes."""
-    return generate_mesh(read_mesh_input(path))
+    return generate_mesh(read_mesh_input(path, input_format=input_format), repair_degenerate=repair_degenerate)
 
 
 def generate_xyzgrid_files(
@@ -215,3 +236,36 @@ def _effective_ratio(ratio: float) -> float:
     if ratio <= 0.0:
         raise ValueError("Stretching ratio must be positive")
     return ratio if ratio >= 1.0 else 1.0 / ratio
+
+
+def _has_z_params(params: dict[str, object]) -> bool:
+    z_keys = [
+        "Lz",
+        "z_center_dense",
+        "Lz_dense",
+        "Nz_dense",
+        "len_front",
+        "len_back",
+        "n_front_stretch",
+        "n_front_uniform",
+        "n_back_uniform",
+        "n_back_stretch",
+        "r_front",
+        "r_back",
+    ]
+    if not all(key in params for key in z_keys):
+        return False
+    return float(params["Lz"]) > 0.0 and int(params["Nz_dense"]) > 0
+
+
+def _repair_strictly_increasing(nodes: np.ndarray, length: float) -> np.ndarray:
+    repaired = np.asarray(nodes, dtype=float).copy()
+    for idx in range(1, repaired.size - 1):
+        if repaired[idx] <= repaired[idx - 1]:
+            repaired[idx] = np.nextafter(repaired[idx - 1], np.inf)
+    repaired[-1] = float(length)
+    if repaired.size >= 2 and repaired[-1] <= repaired[-2]:
+        raise ValueError(
+            "Generated axis is too degenerate to preview safely; reduce stretching ratio or interval count."
+        )
+    return repaired
