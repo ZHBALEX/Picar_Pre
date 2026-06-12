@@ -11,9 +11,12 @@ from .analysis import (
     format_centerline_report,
     format_centroid_report,
     write_centerline_csv,
+    write_centroid_equation_csv,
+    write_centroid_kinematics_csv,
+    write_midline_kinematics_csv,
 )
 from .fort import FortMotionInfo, fort_motion_info, format_motion_info, rotate_fort_motion
-from .visualize import plot_motion_2d, plot_motion_3d
+from .visualize import plot_midline_motion, plot_motion_2d, plot_motion_3d
 
 
 DEFAULT_FORT_START = 41
@@ -119,6 +122,13 @@ class MotionProject:
         plane: str = "xy",
         component_order: str = "xyz",
         motion_mode: str = "velocity",
+        axis: str = "x",
+        value_axis: str = "y",
+        bins: int = 80,
+        stride: int = 80,
+        centerline_method: str = "bounds",
+        normalize_station: bool = True,
+        center_midline: bool = True,
         save_path: str | Path | None = None,
         show: bool = True,
     ):
@@ -154,7 +164,28 @@ class MotionProject:
                 save_path=save_path,
                 show=show,
             )
-        raise ValueError("mode must be '2d' or '3d'")
+        if mode == "midline":
+            analysis = analyze_centerline_motion(
+                body,
+                fort_path,
+                axis=axis,
+                value_axes=(value_axis,),
+                bins=bins,
+                stride=stride,
+                component_order=component_order,
+                motion_mode=motion_mode,
+                centerline_method=centerline_method,
+            )
+            return plot_midline_motion(
+                analysis,
+                station_axis=axis,
+                value_axis=value_axis,
+                normalize_station=normalize_station,
+                center=center_midline,
+                save_path=save_path,
+                show=show,
+            )
+        raise ValueError("mode must be '2d', '3d', or 'midline'")
 
     def analyze_centroid(
         self,
@@ -164,6 +195,9 @@ class MotionProject:
         period: float = 1.0,
         component_order: str = "xyz",
         motion_mode: str = "velocity",
+        centerline_method: str = "bounds",
+        output: str | Path | None = None,
+        kinematics_output: str | Path | None = None,
     ) -> str:
         bodies = read_surface(self.surface_path)
         body = self._body_by_id(bodies, body_id)
@@ -174,18 +208,25 @@ class MotionProject:
             period=period,
             component_order=component_order,
             motion_mode=motion_mode,
+            centerline_method=centerline_method,
         )
-        return "\n".join(
-            [
-                "Motion Analysis",
-                "===============",
-                f"Case dir : {self.case_dir}",
-                f"Body     : {body_id}",
-                f"Fort file: {self.fort_path_for_body(body_id)}",
-                "",
-                format_centroid_report(analysis, period=period),
-            ]
-        )
+        lines = [
+            "Motion Analysis",
+            "===============",
+            f"Case dir : {self.case_dir}",
+            f"Body     : {body_id}",
+            f"Fort file: {self.fort_path_for_body(body_id)}",
+        ]
+        if output is not None:
+            out = self._resolve_output_path(output)
+            write_centroid_equation_csv(out, analysis)
+            lines.append(f"Equation CSV  : {out}")
+        if kinematics_output is not None:
+            out = self._resolve_output_path(kinematics_output)
+            write_centroid_kinematics_csv(out, analysis)
+            lines.append(f"Kinematics CSV: {out}")
+        lines.extend(["", format_centroid_report(analysis, period=period)])
+        return "\n".join(lines)
 
     def analyze_centerline(
         self,
@@ -199,6 +240,7 @@ class MotionProject:
         component_order: str = "xyz",
         motion_mode: str = "velocity",
         output: str | Path | None = None,
+        kinematics_output: str | Path | None = None,
     ) -> str:
         bodies = read_surface(self.surface_path)
         body = self._body_by_id(bodies, body_id)
@@ -222,11 +264,13 @@ class MotionProject:
             f"Fort file: {self.fort_path_for_body(body_id)}",
         ]
         if output is not None:
-            out = Path(output)
-            if not out.is_absolute():
-                out = self.case_dir / out
+            out = self._resolve_output_path(output)
             write_centerline_csv(out, analysis, axis=axis)
-            lines.append(f"CSV      : {out}")
+            lines.append(f"Equation CSV  : {out}")
+        if kinematics_output is not None:
+            out = self._resolve_output_path(kinematics_output)
+            write_midline_kinematics_csv(out, analysis, axis=axis)
+            lines.append(f"Kinematics CSV: {out}")
 
         lines.extend(["", format_centerline_report(analysis, axis=axis, period=period)])
         return "\n".join(lines)
@@ -235,3 +279,7 @@ class MotionProject:
         if body_id < 1 or body_id > len(bodies):
             raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
         return bodies[body_id - 1]
+
+    def _resolve_output_path(self, output: str | Path) -> Path:
+        out = Path(output)
+        return out if out.is_absolute() else self.case_dir / out

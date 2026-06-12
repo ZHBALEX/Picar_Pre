@@ -37,6 +37,7 @@ class HarmonicFit:
 class CentroidMotionAnalysis:
     """Centroid time series and harmonic fits."""
 
+    frames: np.ndarray
     times: np.ndarray
     centroids: np.ndarray
     fits: dict[str, HarmonicFit]
@@ -46,6 +47,7 @@ class CentroidMotionAnalysis:
 class CenterlineMotionAnalysis:
     """Station-wise centerline time series and harmonic fits."""
 
+    frames: np.ndarray
     times: np.ndarray
     stations: np.ndarray
     values: np.ndarray
@@ -109,6 +111,7 @@ def analyze_centroid_motion(
         raise ValueError(f"fort node count {info.node_count} does not match surface node count {body.node_count}")
 
     indices = frame_indices(info.frame_count, stride=stride)
+    frames = np.asarray(indices, dtype=int)
     times = np.zeros(len(indices), dtype=float)
     centroids = np.zeros((len(indices), 3), dtype=float)
     base_centroid = body.points.mean(axis=0)
@@ -135,7 +138,7 @@ def analyze_centroid_motion(
                 raise ValueError("motion_mode must be 'velocity', 'relative', or 'displacement'")
 
     fits = {axis: fit_first_harmonic(times, centroids[:, idx], period=period) for axis, idx in AXIS_INDEX.items()}
-    return CentroidMotionAnalysis(times=times, centroids=centroids, fits=fits)
+    return CentroidMotionAnalysis(frames=frames, times=times, centroids=centroids, fits=fits)
 
 
 def analyze_centerline_motion(
@@ -149,11 +152,12 @@ def analyze_centerline_motion(
     period: float = 1.0,
     component_order: str = "xyz",
     motion_mode: str = "velocity",
+    centerline_method: str = "bounds",
 ) -> CenterlineMotionAnalysis:
     """Fit station-wise centerline motion along a reference coordinate axis.
 
     Stations are fixed bins in the reference surface coordinates. For each time
-    frame, deformed node positions are averaged inside each station bin.
+    frame, a station value is extracted from the deformed nodes in that bin.
     """
     info = fort_motion_info(fort_path)
     if info.node_count != body.node_count:
@@ -166,6 +170,9 @@ def analyze_centerline_motion(
     for value_axis in value_axes:
         if value_axis not in AXIS_INDEX:
             raise ValueError("value axes must be chosen from: x, y, z")
+    centerline_method = centerline_method.lower()
+    if centerline_method not in {"bounds", "mean"}:
+        raise ValueError("centerline_method must be 'bounds' or 'mean'")
 
     axis_idx = AXIS_INDEX[axis]
     value_indices = [AXIS_INDEX[item] for item in value_axes]
@@ -176,6 +183,7 @@ def analyze_centerline_motion(
     bin_counts = np.bincount(bin_ids, minlength=len(stations)).astype(float)
 
     indices = frame_indices(info.frame_count, stride=stride)
+    frames = np.asarray(indices, dtype=int)
     times = np.zeros(len(indices), dtype=float)
     values = np.full((len(indices), len(stations), len(value_axes)), np.nan, dtype=float)
     points = body.points.copy()
@@ -188,7 +196,7 @@ def analyze_centerline_motion(
             if frame_index in target_rows:
                 row = target_rows[frame_index]
                 times[row] = header.time
-                _fill_centerline_values(values, row, points, value_indices, bin_ids, bin_counts)
+                _fill_centerline_values(values, row, points, value_indices, bin_ids, bin_counts, method=centerline_method)
     else:
         for row, frame_index in enumerate(indices):
             header, motion = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
@@ -199,7 +207,7 @@ def analyze_centerline_motion(
                 deformed = body.points + motion
             else:
                 raise ValueError("motion_mode must be 'velocity', 'relative', or 'displacement'")
-            _fill_centerline_values(values, row, deformed, value_indices, bin_ids, bin_counts)
+            _fill_centerline_values(values, row, deformed, value_indices, bin_ids, bin_counts, method=centerline_method)
 
     fits: dict[str, list[HarmonicFit | None]] = {value_axis: [] for value_axis in value_axes}
     for value_col, value_axis in enumerate(value_axes):
@@ -210,7 +218,7 @@ def analyze_centerline_motion(
             else:
                 fits[value_axis].append(fit_first_harmonic(times, series, period=period))
 
-    return CenterlineMotionAnalysis(times=times, stations=stations, values=values, value_axes=value_axes, fits=fits)
+    return CenterlineMotionAnalysis(frames=frames, times=times, stations=stations, values=values, value_axes=value_axes, fits=fits)
 
 
 def format_centroid_report(analysis: CentroidMotionAnalysis, period: float = 1.0) -> str:
@@ -248,11 +256,23 @@ def _fill_centerline_values(
     value_indices: list[int],
     bin_ids: np.ndarray,
     bin_counts: np.ndarray,
+    method: str = "bounds",
 ) -> None:
+    valid = bin_counts > 0
     for value_col, value_idx in enumerate(value_indices):
-        sums = np.bincount(bin_ids, weights=points[:, value_idx], minlength=len(bin_counts))
-        valid = bin_counts > 0
-        values[row, valid, value_col] = sums[valid] / bin_counts[valid]
+        component = points[:, value_idx]
+        if method == "mean":
+            sums = np.bincount(bin_ids, weights=component, minlength=len(bin_counts))
+            values[row, valid, value_col] = sums[valid] / bin_counts[valid]
+        elif method == "bounds":
+            lower = np.full(len(bin_counts), np.inf, dtype=float)
+            upper = np.full(len(bin_counts), -np.inf, dtype=float)
+            np.minimum.at(lower, bin_ids, component)
+            np.maximum.at(upper, bin_ids, component)
+            finite = valid & np.isfinite(lower) & np.isfinite(upper)
+            values[row, finite, value_col] = 0.5 * (lower[finite] + upper[finite])
+        else:
+            raise ValueError("method must be 'bounds' or 'mean'")
 
 
 def format_centerline_report(analysis: CenterlineMotionAnalysis, axis: str = "x", period: float = 1.0, preview: int = 8) -> str:
@@ -321,4 +341,55 @@ def write_centerline_csv(path: str | Path, analysis: CenterlineMotionAnalysis, a
                         fit.samples,
                     ]
                 )
+    return path
+
+
+def write_centroid_equation_csv(path: str | Path, analysis: CentroidMotionAnalysis) -> Path:
+    """Write centroid harmonic coefficients to CSV."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["quantity", "offset", "cos_coeff", "sin_coeff", "amplitude", "phase", "rmse", "samples"])
+        for axis in ("x", "y", "z"):
+            fit = analysis.fits[axis]
+            writer.writerow(
+                [
+                    f"centroid_{axis}",
+                    f"{fit.offset:.16g}",
+                    f"{fit.cos_coeff:.16g}",
+                    f"{fit.sin_coeff:.16g}",
+                    f"{fit.amplitude:.16g}",
+                    f"{fit.phase:.16g}",
+                    f"{fit.rmse:.16g}",
+                    fit.samples,
+                ]
+            )
+    return path
+
+
+def write_centroid_kinematics_csv(path: str | Path, analysis: CentroidMotionAnalysis) -> Path:
+    """Write centroid time-series kinematics to CSV."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["frame", "time", "x", "y", "z"])
+        for frame, time, point in zip(analysis.frames, analysis.times, analysis.centroids):
+            writer.writerow([int(frame), f"{time:.16g}", f"{point[0]:.16g}", f"{point[1]:.16g}", f"{point[2]:.16g}"])
+    return path
+
+
+def write_midline_kinematics_csv(path: str | Path, analysis: CenterlineMotionAnalysis, axis: str = "x") -> Path:
+    """Write station-wise midline kinematics time series to CSV."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["frame", "time", "station_axis", "station", *analysis.value_axes])
+        for time_row, (frame, time) in enumerate(zip(analysis.frames, analysis.times)):
+            for station_idx, station in enumerate(analysis.stations):
+                row = [int(frame), f"{time:.16g}", axis, f"{station:.16g}"]
+                row.extend(f"{analysis.values[time_row, station_idx, value_col]:.16g}" for value_col in range(len(analysis.value_axes)))
+                writer.writerow(row)
     return path

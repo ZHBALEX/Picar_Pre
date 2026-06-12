@@ -63,12 +63,20 @@ is the highlighted frame.
 ```bash
 python motion/run_motion_tools.py --case-dir example/run_case_2D view 2d --body 1 --frame 240 --samples 18 --save body1_motion.png --no-show
 python motion/run_motion_tools.py --case-dir example/run_case view 3d --body 4 --frame 240 --samples 8 --save body4_motion.png --no-show
+python motion/run_motion_tools.py --case-dir example/run_case_2D view midline --body 1 --axis x --value-axis y --bins 80 --stride 80 --save body1_midline.png --no-show
 ```
 
 In `2d` mode, `--plane xy|xz|yz` selects the projection. Thin side-wall XY
 surfaces are drawn as one representative closed layer, which keeps 2D plots
 close to a clean outline/envelope view. In `3d` mode, PyVista draws sampled
 surface meshes as a semi-transparent envelope with the highlighted frame in red.
+In `midline` mode, station-wise centerline motion is extracted from the
+integrated body positions, normalized to `0..1` along `--axis`, mean-centered by
+default, and plotted as phase curves with true upper/lower dashed envelope
+lines. The default `--centerline-method bounds` uses the midpoint between each
+station's lower and upper value-coordinate bounds; `--centerline-method mean`
+uses the node average. Use `--absolute-midline` to plot absolute centerline
+coordinates, or `--raw-station` to keep the original station coordinate.
 
 ## Analyze
 
@@ -87,16 +95,20 @@ This reports first-harmonic equations for centroid `x(t)`, `y(t)`, and `z(t)`:
 q(t) = offset + amplitude*cos(2*pi*t/period + phase)
 ```
 
-Fit station-wise centerline motion along a reference axis:
+Fit station-wise midline/centerline motion along a reference axis:
 
 ```bash
-python motion/run_motion_tools.py --case-dir example/run_case_2D analyze centerline --body 1 --axis x --bins 60 --output centerline_body1.csv
+python motion/run_motion_tools.py --case-dir example/run_case_2D analyze midline --body 1 --axis x --bins 60 --output midline_equations_body1.csv --kinematics-output midline_kinematics_body1.csv
 ```
 
 Stations are fixed bins in the reference surface coordinate. For each frame, the
-deformed nodes inside each station are averaged, then each requested value axis
-is fitted independently. Use `--value-axis y --value-axis z` to choose outputs;
-the default is `y,z`.
+deformed nodes inside each station are reduced to a centerline value, then each
+requested value axis is fitted independently. The default
+`--centerline-method bounds` uses the midpoint between lower and upper station
+bounds; use `--centerline-method mean` for node averaging. Use
+`--value-axis y --value-axis z` to choose outputs; the default is `y,z`.
+`--output` writes fitted harmonic-equation coefficients; `--kinematics-output`
+writes the station-wise time series.
 
 Other likely edit operations:
 

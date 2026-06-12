@@ -42,23 +42,32 @@ def parse_args() -> argparse.Namespace:
     rotate.add_argument("--suffix", default="_rotated", help="Output suffix appended after fort.NN. Default: _rotated.")
 
     view = subparsers.add_parser("view", help="Visualize fort.* motion together with unstruc_surface_in.dat.")
-    view.add_argument("mode", choices=["2d", "3d"], nargs="?", default="2d", help="Visualization mode. Default: 2d.")
+    view.add_argument("mode", choices=["2d", "3d", "midline"], nargs="?", default="2d", help="Visualization mode. Default: 2d.")
     view.add_argument("--body", type=int, default=1, help="1-based body id. Default: 1.")
     view.add_argument("--frame", type=int, default=-1, help="Highlighted frame index. Negative values count from the end. Default: -1.")
     view.add_argument("--samples", type=int, default=24, help="Number of sampled frames for the gray envelope. Default: 24.")
     view.add_argument("--plane", choices=["xy", "xz", "yz"], default="xy", help="Projection plane for 2d mode. Default: xy.")
+    view.add_argument("--axis", choices=["x", "y", "z"], default="x", help="Reference station axis for midline mode. Default: x.")
+    view.add_argument("--value-axis", choices=["x", "y", "z"], default="y", help="Midline value axis to plot. Default: y.")
+    view.add_argument("--bins", type=int, default=80, help="Number of midline stations. Default: 80.")
+    view.add_argument("--stride", type=int, default=80, help="Use every Nth frame for midline mode. Default: 80.")
+    view.add_argument("--centerline-method", choices=["bounds", "mean"], default="bounds", help="Midline extraction method. Default: bounds.")
+    view.add_argument("--raw-station", action="store_true", help="Use raw station coordinates instead of normalized 0..1 station.")
+    view.add_argument("--absolute-midline", action="store_true", help="Plot absolute midline positions instead of mean-centered motion.")
     view.add_argument("--save", type=Path, default=None, help="Save figure/screenshot path.")
     view.add_argument("--no-show", action="store_true", help="Do not open an interactive window.")
 
     analyze = subparsers.add_parser("analyze", help="Analyze fort.* motion equations.")
-    analyze.add_argument("kind", choices=["centroid", "centerline"], help="Analysis type.")
+    analyze.add_argument("kind", choices=["centroid", "centerline", "midline"], help="Analysis type.")
     analyze.add_argument("--body", type=int, default=1, help="1-based body id. Default: 1.")
     analyze.add_argument("--stride", type=int, default=1, help="Use every Nth frame. Default: 1.")
     analyze.add_argument("--period", type=float, default=1.0, help="Motion period used by harmonic fits. Default: 1.0.")
     analyze.add_argument("--axis", choices=["x", "y", "z"], default="x", help="Reference axis for centerline. Default: x.")
     analyze.add_argument("--value-axis", choices=["x", "y", "z"], action="append", help="Centerline value axis to fit. Repeatable. Default: y and z.")
     analyze.add_argument("--bins", type=int, default=80, help="Number of centerline stations. Default: 80.")
-    analyze.add_argument("--output", type=Path, default=None, help="CSV output for centerline harmonic coefficients.")
+    analyze.add_argument("--centerline-method", choices=["bounds", "mean"], default="bounds", help="Centerline extraction method. Default: bounds.")
+    analyze.add_argument("--output", type=Path, default=None, help="CSV output for harmonic-equation coefficients.")
+    analyze.add_argument("--kinematics-output", type=Path, default=None, help="CSV output for time-series kinematics.")
 
     args = parser.parse_args()
     if args.command is None:
@@ -100,6 +109,13 @@ def main() -> None:
             plane=args.plane,
             component_order=args.component_order,
             motion_mode=args.motion_mode,
+            axis=args.axis,
+            value_axis=args.value_axis,
+            bins=args.bins,
+            stride=args.stride,
+            centerline_method=args.centerline_method,
+            normalize_station=not args.raw_station,
+            center_midline=not args.absolute_midline,
             save_path=args.save,
             show=not args.no_show,
         )
@@ -113,9 +129,12 @@ def main() -> None:
                     period=args.period,
                     component_order=args.component_order,
                     motion_mode=args.motion_mode,
+                    centerline_method=args.centerline_method,
+                    output=args.output,
+                    kinematics_output=args.kinematics_output,
                 )
             )
-        elif args.kind == "centerline":
+        elif args.kind in {"centerline", "midline"}:
             value_axes = tuple(args.value_axis) if args.value_axis else ("y", "z")
             print(
                 project.analyze_centerline(
@@ -128,6 +147,7 @@ def main() -> None:
                     component_order=args.component_order,
                     motion_mode=args.motion_mode,
                     output=args.output,
+                    kinematics_output=args.kinematics_output,
                 )
             )
 

@@ -6,6 +6,7 @@ import numpy as np
 
 from geometry.unstructure_surface.surface import SurfaceBody
 
+from .analysis import CenterlineMotionAnalysis
 from .fort import fort_motion_info, read_frame
 
 
@@ -180,6 +181,93 @@ def plot_motion_3d(
         plotter.show()
     else:
         plotter.close()
+
+
+def plot_midline_motion(
+    analysis: CenterlineMotionAnalysis,
+    *,
+    station_axis: str = "x",
+    value_axis: str = "y",
+    normalize_station: bool = True,
+    center: bool = True,
+    envelope: bool = True,
+    save_path: str | Path | None = None,
+    show: bool = True,
+    figsize: tuple[float, float] = (7.0, 3.6),
+):
+    """Plot station-wise midline motion as phase curves plus an envelope."""
+    if not show or save_path is not None:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    value_axis = value_axis.lower()
+    if value_axis not in analysis.value_axes:
+        raise ValueError(f"value_axis must be one of: {', '.join(analysis.value_axes)}")
+    value_col = analysis.value_axes.index(value_axis)
+
+    stations = np.asarray(analysis.stations, dtype=float)
+    values = np.asarray(analysis.values[:, :, value_col], dtype=float)
+    valid_stations = np.isfinite(stations) & np.any(np.isfinite(values), axis=0)
+    stations = stations[valid_stations]
+    values = values[:, valid_stations]
+    if stations.size == 0:
+        raise ValueError("No valid centerline stations are available for plotting")
+
+    if normalize_station:
+        span = float(stations.max() - stations.min())
+        if span <= 0.0:
+            x_values = stations.copy()
+        else:
+            x_values = (stations - stations.min()) / span
+        x_label = f"{station_axis}/L"
+    else:
+        x_values = stations
+        x_label = station_axis.upper()
+
+    y_values = values.copy()
+    if center:
+        station_offsets = np.nanmean(y_values, axis=0)
+        y_values = y_values - station_offsets.reshape(1, -1)
+        y_label = f"{value_axis.upper()} - mean({value_axis.upper()})"
+    else:
+        y_label = value_axis.upper()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    colors = plt.cm.Reds(np.linspace(0.3, 1.0, len(analysis.times)))
+    for row, color in enumerate(colors):
+        ax.plot(x_values, y_values[row], color=color, linewidth=1.0)
+
+    if envelope:
+        upper = np.nanmax(y_values, axis=0)
+        lower = np.nanmin(y_values, axis=0)
+        ax.plot(x_values, upper, color="green", linestyle="--", linewidth=1.6, alpha=0.55)
+        ax.plot(x_values, lower, color="green", linestyle="--", linewidth=1.6, alpha=0.55)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.14)
+    ax.set_title(f"Midline motion, {value_axis.upper()} over {station_axis.upper()}")
+    fig.tight_layout()
+
+    if save_path:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        print()
+        print("Saved Figure")
+        print("============")
+        print(f"Path: {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig, ax
 
 
 def motion_points_for_frames(
