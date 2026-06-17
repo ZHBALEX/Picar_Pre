@@ -7,6 +7,52 @@ import numpy as np
 from .surface import SurfaceBody
 
 
+def surface_body_to_trimesh(body: SurfaceBody):
+    """Convert one triangulated surface body to a trimesh mesh."""
+    import trimesh
+
+    if body.elem_count == 0:
+        raise ValueError("Cannot export a body with zero elements to STL")
+
+    vertices = np.asarray(body.points, dtype=float)
+    node_ids = body.nodes[:, 0].astype(int)
+    id_to_index = {node_id: idx for idx, node_id in enumerate(node_ids)}
+
+    faces = np.zeros((body.elem_count, 3), dtype=int)
+    for row, elem in enumerate(body.elems[:, 1:4].astype(int)):
+        try:
+            faces[row] = [id_to_index[int(node_id)] for node_id in elem]
+        except KeyError as exc:
+            raise ValueError(f"Element references missing node id {exc.args[0]}") from exc
+
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+
+def surface_bodies_to_trimesh(bodies: list[SurfaceBody]):
+    """Convert one or more triangulated surface bodies to one trimesh mesh."""
+    import trimesh
+
+    if not bodies:
+        raise ValueError("No surface bodies were provided")
+
+    meshes = [surface_body_to_trimesh(body) for body in bodies]
+    if len(meshes) == 1:
+        return meshes[0]
+    return trimesh.util.concatenate(meshes)
+
+
+def surface_bodies_to_stl(
+    bodies: list[SurfaceBody],
+    output_stl: str | Path,
+) -> Path:
+    """Export triangulated unstructured surface bodies to an STL file."""
+    out = Path(output_stl)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    mesh = surface_bodies_to_trimesh(bodies)
+    mesh.export(out)
+    return out
+
+
 def stl_to_surface_body(stl_file: str | Path, precision: int = 8) -> SurfaceBody:
     """Convert an STL triangular mesh to one SurfaceBody."""
     import trimesh

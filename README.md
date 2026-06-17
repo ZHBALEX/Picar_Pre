@@ -169,6 +169,12 @@ Convert STL files already inside the case directory:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case convert-stl
 ```
 
+Export a triangulated `unstruc_surface_in.dat` back to STL:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case export-stl --output surface.stl
+```
+
 Combine separate surface files into one multi-body surface:
 
 ```powershell
@@ -259,14 +265,20 @@ The surface browser editor can generate simple parametric bodies and export
 surface/STL files:
 
 ```powershell
-python -m http.server 8765
+python -m http.server 8765 --bind 127.0.0.1
 ```
 
 Open:
 
 ```text
-http://localhost:8765/geometry/unstructure_surface/editor/
+http://127.0.0.1:8765/geometry/unstructure_surface/editor/
 ```
+
+Keep the PowerShell server running while using the editor. For a 3D cylinder,
+choose `Circle / 2D cylinder`, enable `3D`, set `Thickness`, then export
+`unstruc_surface_in.dat`. See
+[`geometry/unstructure_surface/README.md`](geometry/unstructure_surface/README.md)
+for the full 3D cylinder quick start.
 
 ## Mesh Tools
 

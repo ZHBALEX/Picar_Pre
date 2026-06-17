@@ -77,6 +77,8 @@ lines. The default `--centerline-method bounds` uses the midpoint between each
 station's lower and upper value-coordinate bounds; `--centerline-method mean`
 uses the node average. Use `--absolute-midline` to plot absolute centerline
 coordinates, or `--raw-station` to keep the original station coordinate.
+Matplotlib outputs use a compact JFM-style format: serif math labels, no title,
+and no grid lines. Normalized midline plots label axes as `x/L_B` and `y/L_B`.
 
 ## Analyze
 

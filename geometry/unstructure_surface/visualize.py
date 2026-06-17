@@ -11,6 +11,30 @@ from .surface import SurfaceBody, sample_two_sides_indices
 COLOR_CYCLE = ["#ed6b9f", "#bebed8", "#9bc9dd", "#a2d59b", "#ffd4af", "red", "blue", "green"]
 
 
+def _show_readable_bounds(plotter) -> None:
+    """Show sparse PyVista bounds labels without crowding the axis corner."""
+    bounds_kwargs = {
+        "grid": "front",
+        "location": "outer",
+        "ticks": "outside",
+        "all_edges": True,
+        "font_size": 10,
+        "n_xlabels": 3,
+        "n_ylabels": 3,
+        "n_zlabels": 3,
+        "fmt": "%.3g",
+        "xlabel": "X",
+        "ylabel": "Y",
+        "zlabel": "Z",
+    }
+    try:
+        plotter.show_bounds(**bounds_kwargs)
+    except TypeError:
+        # Older PyVista releases do not support every styling keyword.
+        fallback_keys = ["font_size", "n_xlabels", "n_ylabels", "n_zlabels", "fmt", "xlabel", "ylabel", "zlabel"]
+        plotter.show_bounds(**{key: bounds_kwargs[key] for key in fallback_keys})
+
+
 def body_to_pyvista_mesh(body: SurfaceBody):
     """Convert a SurfaceBody to PyVista PolyData."""
     import pyvista as pv
@@ -29,6 +53,7 @@ def visualize_multi_mesh(bodies: Iterable[SurfaceBody]) -> None:
     for body in bodies:
         plotter.add_mesh(body_to_pyvista_mesh(body), show_edges=True)
     plotter.show_axes()
+    _show_readable_bounds(plotter)
     plotter.show()
 
 
@@ -39,6 +64,7 @@ def visualize_body_mesh(body: SurfaceBody, show_edges: bool = True) -> None:
     plotter = pv.Plotter()
     plotter.add_mesh(body_to_pyvista_mesh(body), show_edges=show_edges, edge_color="black", color="lightblue")
     plotter.show_axes()
+    _show_readable_bounds(plotter)
     plotter.show()
 
 
@@ -53,6 +79,7 @@ def plot_pointcloud_multi(bodies_or_points: Iterable[SurfaceBody | np.ndarray]) 
             continue
         plotter.add_points(pv.PolyData(pts), color=COLOR_CYCLE[idx % len(COLOR_CYCLE)], point_size=4, opacity=0.5)
     plotter.show_axes()
+    _show_readable_bounds(plotter)
     plotter.show()
 
 
@@ -63,7 +90,7 @@ def plot_pointcloud_all(points: np.ndarray) -> None:
     plotter = pv.Plotter()
     plotter.add_points(pv.PolyData(np.asarray(points)), render_points_as_spheres=True, point_size=5)
     plotter.show_axes()
-    plotter.show_bounds()
+    _show_readable_bounds(plotter)
     plotter.show()
 
 

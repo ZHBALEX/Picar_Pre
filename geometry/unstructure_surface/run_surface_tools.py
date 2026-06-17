@@ -80,6 +80,10 @@ def parse_args() -> argparse.Namespace:
     convert.add_argument("--append", action="store_true", help="Append converted STL bodies to the existing surface.")
     convert.add_argument("--precision", type=int, default=8, help="Decimal precision before STL vertex deduplication.")
 
+    export_stl = subparsers.add_parser("export-stl", help="Export the target unstructured surface to STL.")
+    export_stl.add_argument("--output", default=None, help="Output STL filename/path. Defaults to surface-name with .stl.")
+    export_stl.add_argument("--body", type=int, action="append", help="1-based body id. Repeat to export selected bodies. Default: all.")
+
     combine = subparsers.add_parser("combine", help="Combine multiple surface files into one multi-body surface.")
     combine.add_argument("surface", nargs="+", help="Surface files to combine. Relative paths are resolved from cwd first, then case-dir.")
     combine.add_argument("--output", default=None, help="Output filename/path. Defaults to surface-name in case-dir.")
@@ -165,6 +169,20 @@ def main() -> None:
         )
         print_write_report("STL Conversion", project, out, len(bodies))
         print(project.report(surface_path=out, bodies=bodies))
+
+    elif args.command == "export-stl":
+        out, bodies = project.export_stl(
+            output=args.output,
+            body_ids=args.body,
+        )
+        print()
+        print("STL Export")
+        print("==========")
+        print(f"Case dir     : {project.case_dir}")
+        print(f"Surface file : {project.surface_path}")
+        print(f"Output STL   : {out}")
+        print(f"Bodies       : {len(bodies)}")
+        print("Status       : DONE")
 
     elif args.command == "combine":
         out, bodies = project.combine_surfaces(

@@ -72,12 +72,13 @@ def plot_motion_2d(
         matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
+    _apply_jfm_style(plt)
 
     info = fort_motion_info(fort_path)
     frame = _normalize_frame(frame, info.frame_count)
     axes = _plane_axes(plane)
     sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
-    frame_points, frame_times = motion_points_for_frames(
+    frame_points, _ = motion_points_for_frames(
         body,
         fort_path,
         sample_indices,
@@ -108,13 +109,10 @@ def plot_motion_2d(
     ax.set_aspect("equal", adjustable="box")
     if hasattr(ax, "set_box_aspect"):
         ax.set_box_aspect(1)
-    ax.grid(True, alpha=0.18)
-    ax.set_xlabel(plane[0].upper())
-    ax.set_ylabel(plane[1].upper())
-    ax.set_title(
-        f"Body motion envelope: frame {frame} / {info.frame_count - 1}, "
-        f"time={frame_times[frame]:.6g}"
-    )
+    ax.grid(False)
+    ax.set_xlabel(_axis_math_label(plane[0]))
+    ax.set_ylabel(_axis_math_label(plane[1]))
+    _apply_jfm_axes(ax)
 
     if save_path:
         save_path = Path(save_path)
@@ -201,6 +199,7 @@ def plot_midline_motion(
 
         matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
+    _apply_jfm_style(plt)
 
     value_axis = value_axis.lower()
     if value_axis not in analysis.value_axes:
@@ -218,21 +217,26 @@ def plot_midline_motion(
     if normalize_station:
         span = float(stations.max() - stations.min())
         if span <= 0.0:
+            length_scale = 1.0
             x_values = stations.copy()
         else:
+            length_scale = span
             x_values = (stations - stations.min()) / span
-        x_label = f"{station_axis}/L"
+        x_label = rf"${station_axis}/L_B$"
     else:
+        length_scale = 1.0
         x_values = stations
-        x_label = station_axis.upper()
+        x_label = _axis_math_label(station_axis)
 
     y_values = values.copy()
     if center:
         station_offsets = np.nanmean(y_values, axis=0)
         y_values = y_values - station_offsets.reshape(1, -1)
-        y_label = f"{value_axis.upper()} - mean({value_axis.upper()})"
+    y_values = y_values / length_scale
+    if normalize_station:
+        y_label = rf"${value_axis}/L_B$"
     else:
-        y_label = value_axis.upper()
+        y_label = _axis_math_label(value_axis)
 
     fig, ax = plt.subplots(figsize=figsize)
     colors = plt.cm.Reds(np.linspace(0.3, 1.0, len(analysis.times)))
@@ -250,8 +254,8 @@ def plot_midline_motion(
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.set_aspect("equal", adjustable="box")
-    ax.grid(True, alpha=0.14)
-    ax.set_title(f"Midline motion, {value_axis.upper()} over {station_axis.upper()}")
+    ax.grid(False)
+    _apply_jfm_axes(ax)
     fig.tight_layout()
 
     if save_path:
@@ -376,6 +380,35 @@ def _polyline_from_indices(points: np.ndarray, indices: np.ndarray) -> list[list
     lines = [[points[idx], points[idx + 1]] for idx in range(len(points) - 1)]
     lines.append([points[-1], points[0]])
     return lines
+
+
+def _apply_jfm_style(plt) -> None:
+    plt.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+            "mathtext.fontset": "stix",
+            "axes.linewidth": 1.0,
+            "axes.titlesize": 0,
+            "axes.labelsize": 18,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "xtick.direction": "out",
+            "ytick.direction": "out",
+            "legend.frameon": False,
+        }
+    )
+
+
+def _apply_jfm_axes(ax) -> None:
+    ax.grid(False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(width=1.0, length=4.0, pad=6.0)
+
+
+def _axis_math_label(axis: str) -> str:
+    return rf"${axis.lower()}$"
 
 
 def _set_equal_2d_limits(ax, points: np.ndarray) -> None:

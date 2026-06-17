@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .modeling import make_parametric_body
-from .stl import stl_to_surface_body
+from .stl import stl_to_surface_body, surface_bodies_to_stl
 from .surface import (
     DEFAULT_CASE_SURFACE,
     SurfaceBody,
@@ -78,6 +78,28 @@ class SurfaceProject:
         bodies.extend(stl_to_surface_body(path, precision=precision) for path in stl_paths)
         out = self.save(bodies, output=output)
         return out, bodies
+
+    def export_stl(
+        self,
+        output: str | Path | None = None,
+        body_ids: list[int] | None = None,
+    ) -> tuple[Path, list[SurfaceBody]]:
+        """Export the target unstructured surface file to STL."""
+        bodies = self.load(required=True)
+        if body_ids is None or len(body_ids) == 0:
+            selected = bodies
+        else:
+            selected = []
+            for body_id in body_ids:
+                if body_id < 1 or body_id > len(bodies):
+                    raise IndexError(f"Body id {body_id} is out of range 1..{len(bodies)}")
+                selected.append(bodies[body_id - 1])
+
+        out = Path(output) if output is not None else self.surface_path.with_suffix(".stl")
+        if not out.is_absolute():
+            out = self.case_dir / out
+        surface_bodies_to_stl(selected, out)
+        return out, selected
 
     def generate(
         self,

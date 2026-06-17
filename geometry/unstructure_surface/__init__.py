@@ -35,7 +35,14 @@ from .modeling import (
     make_rectangle_2d,
 )
 from .project import SurfaceProject
-from .stl import cut_stl_with_box, mesh_report, stl_to_surface_body
+from .stl import (
+    cut_stl_with_box,
+    mesh_report,
+    stl_to_surface_body,
+    surface_bodies_to_stl,
+    surface_bodies_to_trimesh,
+    surface_body_to_trimesh,
+)
 from .visualize import (
     body_to_pyvista_mesh,
     compare_bodies_2d_overlay,
@@ -91,5 +98,8 @@ __all__ = [
     "make_rectangle_2d",
     "mesh_report",
     "stl_to_surface_body",
+    "surface_bodies_to_stl",
+    "surface_bodies_to_trimesh",
+    "surface_body_to_trimesh",
     "SurfaceProject",
 ]

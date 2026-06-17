@@ -111,7 +111,25 @@ Append converted STL bodies to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case convert-stl wing.stl --append
 ```
 
-### 3. Combine Existing Surface Files
+### 3. Export a Surface to STL
+
+Export the target `unstruc_surface_in.dat` to STL:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case export-stl --output surface.stl
+```
+
+Export selected bodies from a multi-body surface by repeating `--body`:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case export-stl --body 1 --body 3 --output selected_bodies.stl
+```
+
+Only triangulated 3D surfaces can be exported to STL. Flat 2D boundary files
+with `elems = 0` must first be generated with `--thickness` so triangle
+elements exist.
+
+### 4. Combine Existing Surface Files
 
 Combine separate surface files into one multi-body `unstruc_surface_in.dat`:
 
@@ -128,7 +146,7 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case
 Relative input paths are resolved from the current working directory first, then
 from `--case-dir`.
 
-### 4. Generate a Simple Parametric Body
+### 5. Generate a Simple Parametric Body
 
 Generate an ellipse:
 
@@ -187,7 +205,7 @@ Append generated body to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate circle --param radius=0.1 --append
 ```
 
-### 5. Transform Existing Surface Bodies
+### 6. Transform Existing Surface Bodies
 
 Transform all bodies:
 
@@ -207,7 +225,7 @@ Write transformed output to a new file:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case transform --body 1 --translate 0.1 0 0 --output unstruc_surface_shifted.dat
 ```
 
-### 6. Visualize
+### 7. Visualize
 
 Show all triangle meshes:
 
@@ -226,6 +244,9 @@ Show one body as points:
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case view body --body 1
 ```
+
+The 3D viewers use sparse outer bounds labels so tick numbers do not crowd the
+axis corner for long or curved geometries.
 
 Show one body as a 2D XY projection:
 
@@ -266,6 +287,17 @@ from geometry.unstructure_surface import SurfaceProject
 
 project = SurfaceProject("path/to/case")
 out, bodies = project.convert_stl()
+print(out)
+print(len(bodies))
+```
+
+### Export a Surface to STL
+
+```python
+from geometry.unstructure_surface import SurfaceProject
+
+project = SurfaceProject("path/to/case")
+out, bodies = project.export_stl(output="surface.stl")
 print(out)
 print(len(bodies))
 ```
@@ -328,14 +360,18 @@ python geometry/transfer_stlToUnstr.py convert --stl input.stl --out unstruc_sur
 Open the static editor:
 
 ```powershell
-python -m http.server 8765
+python -m http.server 8765 --bind 127.0.0.1
 ```
 
-Then open:
+Keep that PowerShell window running, then open:
 
 ```text
-http://localhost:8765/geometry/unstructure_surface/editor/
+http://127.0.0.1:8765/geometry/unstructure_surface/editor/
 ```
+
+Pressing `Ctrl+C` stops the local web server. If port `8765` is already in
+use, choose another port, for example `8766`, and update the browser URL to
+match.
 
 The editor can:
 
@@ -366,6 +402,51 @@ This exports:
 ```text
 nodes = 1800
 elems = 2400
+```
+
+### 3D cylinder quick start
+
+To create a 3D cylinder from the browser editor:
+
+1. Start the local server from the repository root:
+
+   ```powershell
+   python -m http.server 8765 --bind 127.0.0.1
+   ```
+
+2. Open:
+
+   ```text
+   http://127.0.0.1:8765/geometry/unstructure_surface/editor/
+   ```
+
+3. Set the model controls:
+
+   ```text
+   Shape     : Circle / 2D cylinder
+   Radius    : 0.25
+   Points    : 96
+   Center X  : 19.2
+   Center Y  : 10.0
+   Center Z  : 0.0
+   Plane     : XY
+   3D        : on
+   Thickness : 0.1
+   Layers    : 2
+   ```
+
+4. Click `Export DAT` to download `unstruc_surface_in.dat`.
+
+The same 3D cylinder can be generated without the browser:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir geometry/unstructure_surface/test_outputs/cylinder3d generate circle --param radius=0.25 --param n=96 --center 19.2 10 0 --thickness 0.1
+```
+
+Check the generated file with:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir geometry/unstructure_surface/test_outputs/cylinder3d inspect --roundtrip
 ```
 
 Example editor settings for a 2D cylinder:
