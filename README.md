@@ -85,6 +85,18 @@ but rotation should rotate the stored motion vectors too.
 
 Run commands from the repository root.
 
+Launch the unified local console:
+
+```powershell
+python -B case_editor/run_picar_console.py --case-dir example/run_case --port 8765
+```
+
+Open the printed local URL. The console loads `unstruc_surface_in.dat` and
+`xgrid.dat`/`ygrid.dat`/`zgrid.dat` into one shared 3D scene, so geometry and
+mesh can be checked together. By default it draws surface points plus the mesh
+boundary and dense-region box; sampled full-grid and triangle overlays can be
+enabled only when needed.
+
 The easiest complete workflow is the 2D cylinder case builder:
 
 ```powershell
@@ -432,6 +444,9 @@ python -m mesh.run_mesh_tools --case-dir mesh/examples inspect
 
 ## Notes
 
+- `unstruc_surface_in.dat` reading uses a NumPy token-stream fast path for the
+  standard numeric solver format, with the line-aware parser kept as fallback
+  for unusual files.
 - Command-line body ids are 1-based; Python body lists are 0-based.
 - `body_type = 2` means canonical body in the current example format.
 - Solver-style 2D examples use thin side-wall boundary surfaces with triangle

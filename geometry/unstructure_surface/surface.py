@@ -51,7 +51,21 @@ def _is_sentinel(line: str, tol: float = 5.0) -> bool:
 
 
 def read_surface(path: str | Path, sentinel_tol: float = 5.0) -> list[SurfaceBody]:
-    """Read a single-body or multi-body unstructured surface file."""
+    """Read a single-body or multi-body unstructured surface file.
+
+    The common solver format is numeric-only, so the default path tokenizes the
+    whole file with NumPy's C parser and then slices node/element blocks. If a
+    file contains unusual non-numeric records, the original line-aware parser is
+    still used as a compatibility fallback.
+    """
+    try:
+        return _read_surface_token_stream(path, sentinel_tol=sentinel_tol)
+    except (IndexError, TypeError, ValueError):
+        return _read_surface_linewise(path, sentinel_tol=sentinel_tol)
+
+
+def _read_surface_linewise(path: str | Path, sentinel_tol: float = 5.0) -> list[SurfaceBody]:
+    """Read a surface file with strict line-aware parsing."""
     lines = _read_nonempty_lines(path)
     bodies: list[SurfaceBody] = []
     idx = 0
@@ -111,6 +125,57 @@ def read_surface(path: str | Path, sentinel_tol: float = 5.0) -> list[SurfaceBod
         bodies.append(SurfaceBody(nodes=nodes, elems=elems, bbox=bbox))
 
     return bodies
+
+
+def _read_surface_token_stream(path: str | Path, sentinel_tol: float = 5.0) -> list[SurfaceBody]:
+    """Read the standard numeric surface format using NumPy tokenization."""
+    text = Path(path).read_text(encoding="utf-8", errors="ignore")
+    values = np.fromstring(text, sep=" ")
+    if values.size == 0:
+        return []
+
+    bodies: list[SurfaceBody] = []
+    idx = 0
+    size = int(values.size)
+
+    while idx < size:
+        while idx + 2 < size and _token_is_sentinel(values[idx : idx + 3], sentinel_tol):
+            idx += 3
+        if idx >= size:
+            break
+        if idx + 1 >= size:
+            raise ValueError("Incomplete body header")
+
+        node_count = int(values[idx])
+        elem_count = int(values[idx + 1])
+        if node_count < 0 or elem_count < 0:
+            raise ValueError("Negative body counts")
+        idx += 2
+
+        node_values = node_count * 4
+        elem_values = elem_count * 4
+        if idx + node_values + elem_values > size:
+            raise ValueError("Surface body ended early")
+
+        nodes = values[idx : idx + node_values].reshape(node_count, 4).copy()
+        idx += node_values
+
+        elems = values[idx : idx + elem_values].reshape(elem_count, 4).astype(int, copy=True)
+        idx += elem_values
+
+        bbox = None
+        if idx + 2 < size and not _token_is_sentinel(values[idx : idx + 3], sentinel_tol):
+            bbox_values = values[idx : idx + 3]
+            bbox = " ".join(f"{value:.16g}" for value in bbox_values)
+            idx += 3
+
+        bodies.append(SurfaceBody(nodes=nodes, elems=elems, bbox=bbox))
+
+    return bodies
+
+
+def _token_is_sentinel(values: np.ndarray, tol: float) -> bool:
+    return values.size >= 3 and bool(np.all(values[:3] < -tol))
 
 
 def write_surface(path: str | Path, bodies: Iterable[SurfaceBody], write_final_sentinel: bool = True) -> None:
