@@ -2,7 +2,7 @@
   const ids = [
     "shape", "radius", "points", "rx", "ry", "width", "height", "naca", "chord",
     "centerX", "centerY", "centerZ", "rotX", "rotY", "rotZ", "plane", "scale",
-    "make3d", "thickness", "layers"
+    "make3d", "thickness", "layers", "remesh3d", "maxEdge", "layerSpacing"
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   const stats = document.getElementById("stats");
@@ -136,6 +136,9 @@
       make3d: el.make3d.checked,
       thickness: number(el.thickness),
       layers: Math.max(2, Math.floor(number(el.layers))),
+      remesh3d: el.remesh3d.checked,
+      maxEdge: Math.max(0, number(el.maxEdge)),
+      layerSpacing: Math.max(0, number(el.layerSpacing)),
     };
   }
 
@@ -171,6 +174,9 @@
     });
     el.thickness.disabled = !el.make3d.checked;
     el.layers.disabled = !el.make3d.checked;
+    el.remesh3d.disabled = !el.make3d.checked;
+    el.maxEdge.disabled = !el.make3d.checked || !el.remesh3d.checked;
+    el.layerSpacing.disabled = !el.make3d.checked;
   }
 
   function updateDisplayMode() {
@@ -197,16 +203,21 @@
 
   function buildGeometry(cfg) {
     const boundary = buildBoundary(cfg);
-    const points = cfg.make3d && cfg.thickness > 0 ? extrudePoints(boundary, cfg) : boundary;
-    const faces = cfg.make3d && cfg.thickness > 0 ? sideWallFaces(boundary.length, cfg.layers) : [];
+    const meshBoundary = cfg.make3d && cfg.thickness > 0 && cfg.remesh3d ? remeshBoundary(boundary, cfg) : boundary;
+    const meshLayers = cfg.make3d && cfg.thickness > 0 ? effectiveLayers(meshBoundary, cfg) : cfg.layers;
+    const points = cfg.make3d && cfg.thickness > 0 ? extrudePoints(meshBoundary, cfg, meshLayers) : boundary;
+    const faces = cfg.make3d && cfg.thickness > 0 ? sideWallFaces(meshBoundary.length, meshLayers) : [];
     return {
       boundary,
+      meshBoundary,
+      meshLayers,
       points,
       faces,
       plane: cfg.plane,
       key: [
         cfg.shape, cfg.radius, cfg.points, cfg.rx, cfg.ry, cfg.width, cfg.height, cfg.naca, cfg.chord,
-        cfg.center.join(","), cfg.rotation.join(","), cfg.plane, cfg.scale, cfg.make3d, cfg.thickness, cfg.layers
+        cfg.center.join(","), cfg.rotation.join(","), cfg.plane, cfg.scale, cfg.make3d, cfg.thickness, cfg.layers,
+        cfg.remesh3d, cfg.maxEdge, cfg.layerSpacing
       ].join("|"),
     };
   }
@@ -283,13 +294,49 @@
     return [p[0] + cfg.center[0], p[1] + cfg.center[1], p[2] + cfg.center[2]];
   }
 
-  function extrudePoints(boundary, cfg) {
-    const axis = normalAxis(cfg.plane);
+  function remeshBoundary(boundary, cfg) {
+    if (boundary.length < 2) return boundary;
+    const target = effectiveMaxEdge(boundary, cfg);
+    if (!(target > 0)) return boundary;
     const pts = [];
-    for (let layer = 0; layer < cfg.layers; layer += 1) {
-      const t = cfg.layers === 1 ? 0.5 : layer / (cfg.layers - 1);
+    for (let i = 0; i < boundary.length; i += 1) {
+      const a = boundary[i];
+      const b = boundary[(i + 1) % boundary.length];
+      const length = distance(a, b);
+      const pieces = Math.max(1, Math.ceil(length / target - 1e-9));
+      for (let j = 0; j < pieces; j += 1) {
+        const t = j / pieces;
+        pts.push(lerpPoint(a, b, t));
+      }
+    }
+    return pts;
+  }
+
+  function effectiveMaxEdge(boundary, cfg) {
+    if (cfg.maxEdge > 0) return cfg.maxEdge;
+    const lengths = [];
+    for (let i = 0; i < boundary.length; i += 1) {
+      lengths.push(distance(boundary[i], boundary[(i + 1) % boundary.length]));
+    }
+    const perimeter = lengths.reduce((sum, value) => sum + value, 0);
+    return Math.max(perimeter / 96, 1e-9);
+  }
+
+  function effectiveLayers(boundary, cfg) {
+    if (cfg.thickness <= 0) return cfg.layers;
+    if (cfg.layerSpacing > 0) return Math.max(2, Math.ceil(cfg.thickness / cfg.layerSpacing) + 1);
+    if (!cfg.remesh3d) return cfg.layers;
+    const autoSpacing = Math.max(effectiveMaxEdge(boundary, cfg) * 3, cfg.thickness / 40, 1e-9);
+    return Math.max(cfg.layers, Math.ceil(cfg.thickness / autoSpacing) + 1);
+  }
+
+  function extrudePoints(boundary, cfg, layers) {
+    const normal = rotatedPlaneNormal(cfg);
+    const pts = [];
+    for (let layer = 0; layer < layers; layer += 1) {
+      const t = layers === 1 ? 0.5 : layer / (layers - 1);
       const d = -cfg.thickness / 2 + t * cfg.thickness;
-      boundary.forEach((p) => pts.push(offsetAxis(p, axis, d)));
+      boundary.forEach((p) => pts.push(offsetVector(p, normal, d)));
     }
     return pts;
   }
@@ -847,22 +894,25 @@
 
   function buildCommand(cfg) {
     const params = [];
-    if (cfg.shape === "circle") params.push(`--param radius=${cfg.radius}`, `--param n=${cfg.points}`);
-    if (cfg.shape === "ellipse") params.push(`--param rx=${cfg.rx}`, `--param ry=${cfg.ry}`, `--param n=${cfg.points}`);
-    if (cfg.shape === "rectangle") params.push(`--param width=${cfg.width}`, `--param height=${cfg.height}`);
-    if (cfg.shape === "naca") params.push(`--param code=${cfg.naca}`, `--param chord=${cfg.chord}`, `--param n=${cfg.points}`);
+    const s = cfg.scale;
+    if (cfg.shape === "circle") params.push(`--param radius=${cfg.radius * s}`, `--param n=${cfg.points}`);
+    if (cfg.shape === "ellipse") params.push(`--param rx=${cfg.rx * s}`, `--param ry=${cfg.ry * s}`, `--param n=${cfg.points}`);
+    if (cfg.shape === "rectangle") params.push(`--param width=${cfg.width * s}`, `--param height=${cfg.height * s}`);
+    if (cfg.shape === "naca") params.push(`--param code=${cfg.naca}`, `--param chord=${cfg.chord * s}`, `--param n=${cfg.points}`);
     const parts = [
       "python geometry/unstructure_surface/run_surface_tools.py",
       "--case-dir path/to/case",
       "generate",
       cfg.shape,
       ...params,
-      "--center", ...cfg.center,
+      "--center", 0, 0, 0,
       "--plane", cfg.plane,
     ];
     if (cfg.make3d) parts.push("--param", `layers=${cfg.layers}`, "--thickness", cfg.thickness);
+    if (cfg.make3d && cfg.remesh3d) parts.push("--param", `max_edge=${cfg.maxEdge}`);
+    if (cfg.make3d && cfg.remesh3d) parts.push("--param", `layer_spacing=${cfg.layerSpacing}`);
     if (cfg.rotation.some((v) => v !== 0)) parts.push("--rotate", ...cfg.rotation);
-    if (cfg.scale !== 1) parts.push("--scale", cfg.scale);
+    if (cfg.center.some((v) => v !== 0)) parts.push("--translate", ...cfg.center);
     return parts.join(" ");
   }
 
@@ -876,20 +926,41 @@
     URL.revokeObjectURL(url);
   }
 
-  function normalAxis(plane) {
-    if (plane === "xy") return 2;
-    if (plane === "xz") return 1;
-    return 0;
+  function rotatedPlaneNormal(cfg) {
+    let normal;
+    if (cfg.plane === "xy") normal = [0, 0, 1];
+    else if (cfg.plane === "xz") normal = [0, 1, 0];
+    else normal = [1, 0, 0];
+    return rotateVector(normal, cfg.rotation);
   }
 
   function number(input) {
     return Number(input.value || 0);
   }
 
-  function offsetAxis(p, axis, d) {
-    const q = p.slice();
-    q[axis] += d;
-    return q;
+  function offsetVector(p, direction, d) {
+    return [
+      p[0] + direction[0] * d,
+      p[1] + direction[1] * d,
+      p[2] + direction[2] * d,
+    ];
+  }
+
+  function rotateVector(p, rotation) {
+    const [rx, ry, rz] = rotation.map((v) => v * Math.PI / 180);
+    return rotateZ(rotateY(rotateX(p, rx), ry), rz);
+  }
+
+  function distance(a, b) {
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  }
+
+  function lerpPoint(a, b, t) {
+    return [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
   }
 
   function rotateX(p, a) {

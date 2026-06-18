@@ -175,6 +175,19 @@ nodes = 1800
 elems = 2400
 ```
 
+Split long boundary edges before extrusion to avoid stretched 3D triangles:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate rectangle --param width=1.0 --param height=0.5 --param max_edge=0 --param layer_spacing=0.02 --thickness 0.1
+```
+
+`max_edge=0` lets the tool estimate a target edge length from the boundary
+perimeter. Use a positive value to set the target edge length directly.
+`layer_spacing=0` enables automatic spacing through the thickness direction;
+use a positive value to control the axial/layer spacing directly. For interactive
+browser previews of long cylinders, start with `layer_spacing` around `0.1` to
+`0.2` and refine only when exporting the final surface.
+
 Generate a rectangle:
 
 ```powershell
@@ -434,6 +447,12 @@ To create a 3D cylinder from the browser editor:
    Thickness : 0.1
    Layers    : 2
    ```
+
+   Keep `Remesh long boundary edges` enabled if the 3D mesh shows long stretched
+   triangles. Leave `Max edge` as `0` for automatic splitting, or enter a
+   positive target edge length. Leave `Layer spacing` as `0` for automatic
+   browser-friendly axial/layer spacing, or enter a positive value such as
+   `0.1` or `0.2` to control it directly.
 
 4. Click `Export DAT` to download `unstruc_surface_in.dat`.
 

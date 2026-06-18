@@ -111,14 +111,30 @@ def make_naca_2d(
     return body_from_boundary_points(points)
 
 
-def extrude_body(body: SurfaceBody, thickness: float, axis: str = "z", layers: int = 2) -> SurfaceBody:
+def extrude_body(
+    body: SurfaceBody,
+    thickness: float,
+    axis: str = "z",
+    layers: int = 2,
+    max_edge: float | None = None,
+    layer_spacing: float | None = None,
+) -> SurfaceBody:
     """Extrude an ordered boundary curve into a layered side-wall surface."""
     if thickness <= 0:
         raise ValueError("thickness must be positive")
+
+    points = body.points
+    points = resample_closed_boundary(points, max_edge=max_edge, thickness=thickness)
+    if layer_spacing is not None:
+        if layer_spacing > 0:
+            layers = int(np.ceil(thickness / layer_spacing)) + 1
+        else:
+            target_spacing = _effective_max_edge(points, max_edge=max_edge, thickness=thickness)
+            auto_spacing = max(target_spacing * 3.0, thickness / 40.0, 1.0e-9)
+            layers = max(layers, int(np.ceil(thickness / auto_spacing)) + 1)
     if layers < 2:
         raise ValueError("layers must be at least 2")
 
-    points = body.points
     axis_i = _axis_index(axis)
 
     layer_offsets = np.linspace(-thickness / 2.0, thickness / 2.0, layers)
@@ -141,6 +157,33 @@ def extrude_body(body: SurfaceBody, thickness: float, axis: str = "z", layers: i
             faces.append([lower + a, upper + b, upper + a])
 
     return body_from_points_and_faces(all_points, np.asarray(faces, dtype=int))
+
+
+def resample_closed_boundary(points: np.ndarray, max_edge: float | None = None, thickness: float = 0.0) -> np.ndarray:
+    """Split long edges in a closed boundary while preserving existing vertices."""
+    points = np.asarray(points, dtype=float)
+    if len(points) < 2:
+        return points.copy()
+    if max_edge is None:
+        return points.copy()
+
+    max_edge = _effective_max_edge(points, max_edge=max_edge, thickness=thickness)
+    resampled = []
+    lengths = np.linalg.norm(np.roll(points, -1, axis=0) - points, axis=1)
+    for idx, point in enumerate(points):
+        next_point = points[(idx + 1) % len(points)]
+        pieces = max(1, int(np.ceil(lengths[idx] / max_edge - 1.0e-9)))
+        for piece in range(pieces):
+            t = piece / pieces
+            resampled.append(point + (next_point - point) * t)
+    return np.asarray(resampled, dtype=float)
+
+
+def _effective_max_edge(points: np.ndarray, max_edge: float | None = None, thickness: float = 0.0) -> float:
+    lengths = np.linalg.norm(np.roll(points, -1, axis=0) - points, axis=1)
+    if max_edge is None or max_edge <= 0:
+        max_edge = max(float(lengths.sum()) / 96.0, 1.0e-9)
+    return float(max_edge)
 
 
 def make_parametric_body(
@@ -192,9 +235,25 @@ def make_parametric_body(
 
     if thickness > 0.0:
         layers = int(params.get("layers", params.get("z_layers", 2)))
-        body = extrude_body(body, thickness=thickness, axis=_normal_axis_for_plane(plane), layers=layers)
+        max_edge = _optional_float(params, "max_edge", "edge_length", "target_edge")
+        layer_spacing = _optional_float(params, "layer_spacing", "thickness_spacing")
+        body = extrude_body(
+            body,
+            thickness=thickness,
+            axis=_normal_axis_for_plane(plane),
+            layers=layers,
+            max_edge=max_edge,
+            layer_spacing=layer_spacing,
+        )
 
     return transform_body(body, rotation=rotation, translate=translate, scale=scale)
+
+
+def _optional_float(params: dict[str, object], *keys: str) -> float | None:
+    for key in keys:
+        if key in params:
+            return float(params[key])
+    return None
 
 
 def _place_planar_points(points: np.ndarray, center: tuple[float, float, float], plane: str) -> np.ndarray:

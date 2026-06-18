@@ -106,6 +106,20 @@
             <input id="layers" type="number" step="1" min="2" value="3">
           </label>
         </div>
+        <label class="toggle">
+          <input id="remesh3d" type="checkbox" checked>
+          Remesh long boundary edges
+        </label>
+        <div class="grid two">
+          <label>
+            Max edge
+            <input id="maxEdge" type="number" step="0.001" min="0" value="0">
+          </label>
+          <label>
+            Layer spacing
+            <input id="layerSpacing" type="number" step="0.001" min="0" value="0">
+          </label>
+        </div>
       </section>
 
       <section class="panel actions">
@@ -140,6 +154,6 @@
     </section>
   </main>
 
-  <script src="./app.js?v=4"></script>
+  <script src="./app.js?v=8"></script>
 </body>
 </html>
