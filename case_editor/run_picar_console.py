@@ -23,6 +23,14 @@ from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mes
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
+DENSE_UNIFORM_RATIO = 1.05
+DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
+MESH_INPUT_CANDIDATES = (
+    "mesh_input_twolayers.dat",
+    "input_mesh_twolayers.dat",
+    "mesh_input.dat",
+    "input.dat",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,11 +145,11 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "mesh": _mesh_payload(mesh), "input_text": format_mesh_input(params)}
     if path == "/api/mesh/save":
         params = _payload_mesh_params(payload)
-        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or DEFAULT_MESH_INPUT_NAME), params)
         return {"ok": True, "path": str(out), "input_text": format_mesh_input(params)}
     if path == "/api/mesh/generate":
         params = _payload_mesh_params(payload)
-        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or DEFAULT_MESH_INPUT_NAME), params)
         mesh = generate_mesh(params)
         write_mesh(case_dir, mesh, include_index=True)
         return {"ok": True, "input_path": str(out), "mesh": _mesh_payload(mesh), "report": _case_report(case_dir)}
@@ -226,17 +234,19 @@ def _case_report(case_dir: Path) -> dict[str, object]:
 
 
 def _mesh_input_payload(case_dir: Path) -> dict[str, object]:
-    input_path = case_dir / "input.dat"
-    if input_path.exists():
-        try:
-            params = read_mesh_input(input_path)
-            return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": "input"}
-        except Exception:
-            pass
+    input_path = case_dir / DEFAULT_MESH_INPUT_NAME
     if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
         mesh = read_mesh(case_dir, require_z=False)
         params = _params_from_existing_mesh(mesh)
         return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": "inferred-grid"}
+    for candidate in _mesh_input_paths(case_dir):
+        if not candidate.exists():
+            continue
+        try:
+            params = read_mesh_input(candidate)
+            return {"ok": True, "path": str(candidate), "params": _json_ready(params), "source": candidate.name}
+        except Exception:
+            continue
     return {"ok": False, "path": str(input_path), "params": _json_ready(_default_mesh_params()), "source": "default"}
 
 
@@ -256,24 +266,87 @@ def _params_from_existing_mesh(mesh) -> dict[str, object]:
         z0, z1 = float(mesh.z.values[0]), float(mesh.z.values[-1])
     else:
         z0, z1 = 0.0, 0.0
+    x_axis = _axis_params_from_grid(mesh.x.values)
+    y_axis = _axis_params_from_grid(mesh.y.values)
+    z_axis = _axis_params_from_grid(mesh.z.values) if mesh.z is not None and mesh.z.count > 1 else None
     params = _default_mesh_params()
     params.update(
         {
             "Lx": x1 - x0,
             "Ly": y1 - y0,
             "Lz": max(0.0, z1 - z0),
-            "x_center_dense": 0.5 * (x0 + x1),
-            "y_center_dense": 0.5 * (y0 + y1),
-            "z_center_dense": 0.5 * (z0 + z1),
-            "Lx_dense": max((x1 - x0) * 0.4, 1e-6),
-            "Ly_dense": max((y1 - y0) * 0.4, 1e-6),
-            "Lz_dense": max((z1 - z0) * 0.4, 0.0),
-            "Nx_dense": max(1, min(mesh.x.count - 1, max(8, (mesh.x.count - 1) // 2))),
-            "Ny_dense": max(1, min(mesh.y.count - 1, max(8, (mesh.y.count - 1) // 2))),
-            "Nz_dense": max(0, min((mesh.z.count - 1 if mesh.z is not None else 0), max(1, ((mesh.z.count - 1) // 2 if mesh.z is not None else 0)))),
+            "x_center_dense": x_axis["center"],
+            "y_center_dense": y_axis["center"],
+            "z_center_dense": z_axis["center"] if z_axis is not None else 0.0,
+            "Lx_dense": x_axis["dense_length"],
+            "Ly_dense": y_axis["dense_length"],
+            "Lz_dense": z_axis["dense_length"] if z_axis is not None else 0.0,
+            "Nx_dense": x_axis["dense_count"],
+            "Ny_dense": y_axis["dense_count"],
+            "Nz_dense": z_axis["dense_count"] if z_axis is not None else 0,
+            "n_left_stretch": x_axis["left_stretch"],
+            "n_right_stretch": x_axis["right_stretch"],
+            "n_bottom_stretch": y_axis["left_stretch"],
+            "n_top_stretch": y_axis["right_stretch"],
+            "n_front_stretch": z_axis["left_stretch"] if z_axis is not None else 0,
+            "n_back_stretch": z_axis["right_stretch"] if z_axis is not None else 0,
+            "len_left": 0.0,
+            "len_right": 0.0,
+            "len_bottom": 0.0,
+            "len_top": 0.0,
+            "len_front": 0.0,
+            "len_back": 0.0,
         }
     )
     return params
+
+
+def _axis_params_from_grid(values) -> dict[str, float | int]:
+    start = float(values[0])
+    end = float(values[-1])
+    spacing: list[float] = []
+    for i in range(len(values) - 1):
+        delta = float(values[i + 1] - values[i])
+        if delta > 0.0:
+            spacing.append(delta)
+    if not spacing:
+        return {"center": 0.0, "dense_length": 0.0, "dense_count": 0, "left_stretch": 0, "right_stretch": 0}
+
+    min_spacing = min(spacing)
+    max_spacing = max(spacing)
+    if max_spacing / min_spacing <= DENSE_UNIFORM_RATIO:
+        return {
+            "center": 0.5 * (end - start),
+            "dense_length": max(0.0, end - start),
+            "dense_count": len(spacing),
+            "left_stretch": 0,
+            "right_stretch": 0,
+        }
+
+    threshold = min_spacing * 1.08
+    best_start = 0
+    best_end = 0
+    run_start = -1
+    for i, delta in enumerate(spacing):
+        is_dense = delta <= threshold
+        if is_dense and run_start < 0:
+            run_start = i
+        if (not is_dense or i == len(spacing) - 1) and run_start >= 0:
+            run_end = i if is_dense and i == len(spacing) - 1 else i - 1
+            if run_end - run_start > best_end - best_start:
+                best_start = run_start
+                best_end = run_end
+            run_start = -1
+
+    dense_start = float(values[best_start])
+    dense_end = float(values[min(best_end + 1, len(values) - 1)])
+    return {
+        "center": 0.5 * (dense_start + dense_end) - start,
+        "dense_length": max(0.0, dense_end - dense_start),
+        "dense_count": max(1, best_end - best_start + 1),
+        "left_stretch": best_start,
+        "right_stretch": max(0, len(spacing) - best_end - 1),
+    }
 
 
 def _default_mesh_params() -> dict[str, object]:
@@ -322,12 +395,23 @@ def _default_mesh_params() -> dict[str, object]:
 
 
 def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
-    input_path = case_dir / "input.dat"
-    if not input_path.exists():
-        return None
-    try:
-        params = read_mesh_input(input_path)
-    except Exception:
+    if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
+        try:
+            params = _params_from_existing_mesh(read_mesh(case_dir, require_z=False))
+        except Exception:
+            params = None
+    else:
+        params = None
+    if params is None:
+        for input_path in _mesh_input_paths(case_dir):
+            if not input_path.exists():
+                continue
+            try:
+                params = read_mesh_input(input_path)
+                break
+            except Exception:
+                continue
+    if params is None:
         return None
     x0 = float(params["x_center_dense"]) - 0.5 * float(params["Lx_dense"])
     x1 = float(params["x_center_dense"]) + 0.5 * float(params["Lx_dense"])
@@ -340,6 +424,10 @@ def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
         z0 = 0.0
         z1 = 0.0
     return {"x0": x0, "x1": x1, "y0": y0, "y1": y1, "z0": z0, "z1": z1}
+
+
+def _mesh_input_paths(case_dir: Path) -> list[Path]:
+    return [case_dir / name for name in MESH_INPUT_CANDIDATES]
 
 
 def _json_ready(value):

@@ -2,6 +2,7 @@
   const MAX_SURFACE_POINTS = 35000;
   const MAX_SURFACE_TRIANGLES = 9000;
   const MAX_GRID_LINES = 28;
+  const DENSE_UNIFORM_RATIO = 1.05;
 
   const el = {
     caseDir: document.getElementById("caseDir"),
@@ -840,7 +841,7 @@
     if (!spacing.length) return null;
     const minSpacing = Math.min(...spacing);
     const maxSpacing = Math.max(...spacing);
-    if (maxSpacing / minSpacing < 1.05) return [values[0], values[values.length - 1]];
+    if (maxSpacing / minSpacing <= DENSE_UNIFORM_RATIO) return [values[0], values[values.length - 1]];
     const threshold = minSpacing * 1.08;
     let bestStart = 0;
     let bestEnd = 0;
