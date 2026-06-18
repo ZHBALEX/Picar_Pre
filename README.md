@@ -6,6 +6,45 @@ write matching body metadata, generate structured grids, edit common solver
 inputs, inspect prescribed-motion files, and validate the case before running
 the solver.
 
+## Start Here: Picar Console
+
+The main entry point is the local visual console. It loads geometry and mesh into
+one shared 3D scene so the relative placement is easy to check before running a
+case.
+
+From the repository root:
+
+```powershell
+python -B picar_console.py
+```
+
+From anywhere, run the same script by full path:
+
+```powershell
+python -B C:\Users\qd261\Documents\GitHub\Picar_Pre\picar_console.py
+```
+
+Open the exact URL printed in the terminal. It is usually:
+
+```text
+http://127.0.0.1:8765/
+```
+
+If `8765` is already occupied, the console automatically uses the next free
+port and prints that URL instead. Open the printed URL, not an old browser tab.
+
+By default the console opens `example/run_case`. To open another case:
+
+```powershell
+python -B picar_console.py example/generated_circle2d_case
+```
+
+The console shows `unstruc_surface_in.dat` and
+`xgrid.dat`/`ygrid.dat`/`zgrid.dat` together. The default view is fast and
+case-oriented: surface points, mesh boundary, dense-region box, coordinate axes,
+and ticks. Optional layers can enable sampled full-grid lines and surface
+triangle overlays when you need more detail.
+
 The toolkit currently focuses on the solid/body workflow:
 
 - create `unstruc_surface_in.dat` from parametric shapes, STL files, transforms,
@@ -83,19 +122,13 @@ but rotation should rotate the stored motion vectors too.
 
 ## Quick Start
 
-Run commands from the repository root.
-
-Launch the unified local console:
+Open the visual console first:
 
 ```powershell
-python -B case_editor/run_picar_console.py --case-dir example/run_case --port 8765
+python -B picar_console.py
 ```
 
-Open the printed local URL. The console loads `unstruc_surface_in.dat` and
-`xgrid.dat`/`ygrid.dat`/`zgrid.dat` into one shared 3D scene, so geometry and
-mesh can be checked together. By default it draws surface points plus the mesh
-boundary and dense-region box; sampled full-grid and triangle overlays can be
-enabled only when needed.
+Then use the manual commands below when you need to generate or modify files.
 
 The easiest complete workflow is the 2D cylinder case builder:
 

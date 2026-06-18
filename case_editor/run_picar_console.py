@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,9 +24,11 @@ STATIC_DIR = Path(__file__).resolve().parent / "console"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the local Picar preprocessing console.")
-    parser.add_argument("--case-dir", type=Path, default=REPO_ROOT / "example" / "run_case", help="Initial case directory.")
+    parser.add_argument("case", nargs="?", type=Path, help="Initial case directory. Defaults to example/run_case.")
+    parser.add_argument("--case-dir", type=Path, default=None, help="Initial case directory. Overrides the positional case path.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1.")
-    parser.add_argument("--port", type=int, default=8765, help="Bind port. Default: 8765.")
+    parser.add_argument("--port", type=int, default=8765, help="Preferred bind port. If busy, the console uses the next free port. Default: 8765.")
+    parser.add_argument("--strict-port", action="store_true", help="Fail instead of auto-selecting another port when --port is busy.")
     return parser.parse_args()
 
 
@@ -173,15 +176,18 @@ def _json_ready(value):
 
 def main() -> None:
     args = parse_args()
-    case_dir = args.case_dir.resolve()
+    case_dir = (args.case_dir or args.case or (REPO_ROOT / "example" / "run_case")).resolve()
     handler = make_handler(case_dir)
-    server = ThreadingHTTPServer((args.host, args.port), handler)
-    url = f"http://{args.host}:{args.port}/"
+    port = args.port if args.strict_port else _first_free_port(args.host, args.port)
+    server = ThreadingHTTPServer((args.host, port), handler)
+    url = f"http://{args.host}:{port}/"
     print("Picar Console")
     print("=============")
     print(f"Case dir : {case_dir}")
+    if port != args.port:
+        print(f"Port     : {args.port} was busy; using {port}")
     print(f"URL      : {url}")
-    print("Note     : If this URL shows a directory listing, another server is using that browser tab/port; stop it or choose another --port.")
+    print("Note     : Open this exact URL. If 8765 shows a directory listing, it is another server.")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
@@ -189,6 +195,15 @@ def main() -> None:
         print("\nStopped.")
     finally:
         server.server_close()
+
+
+def _first_free_port(host: str, preferred: int, attempts: int = 50) -> int:
+    for port in range(preferred, preferred + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex((host, port)) != 0:
+                return port
+    raise OSError(f"No free port found from {preferred} to {preferred + attempts - 1}")
 
 
 if __name__ == "__main__":

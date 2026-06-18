@@ -42,14 +42,15 @@ Run commands from the repository root.
 Start the browser-based preprocessing console from the terminal:
 
 ```powershell
-python -B case_editor/run_picar_console.py --case-dir case_editor/test_case --port 8765
+python -B picar_console.py case_editor/test_case
 ```
 
 The console serves only local files from this repository session. It loads the
 current `unstruc_surface_in.dat`, `xgrid.dat`, `ygrid.dat`, and `zgrid.dat` into
 one shared 3D scene. The default view is performance-oriented: surface points,
 mesh boundary, dense-region box, and coordinate axes/ticks. Sampled full-grid
-and surface-triangle overlays are optional layers.
+and surface-triangle overlays are optional layers. If the preferred port is
+already occupied, the launcher prints the next free local URL.
 
 ## One-File Example
 
