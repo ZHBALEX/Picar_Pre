@@ -2,7 +2,6 @@
   const MAX_SURFACE_POINTS = 35000;
   const MAX_SURFACE_TRIANGLES = 9000;
   const MAX_GRID_LINES = 28;
-  const MESH_INPUT_NAME = "mesh_input_twolayers.dat";
 
   const el = {
     caseDir: document.getElementById("caseDir"),
@@ -49,7 +48,6 @@
     lastX: 0,
     lastY: 0,
     framePending: false,
-    postApiAvailable: false,
   };
 
   init();
@@ -68,7 +66,6 @@
     el.topView.addEventListener("click", topView);
     el.isoView.addEventListener("click", isoView);
     el.fileInput.addEventListener("change", () => readFiles(el.fileInput.files));
-    el.geometryFile.addEventListener("change", () => previewGeometrySelection());
     ["dragenter", "dragover"].forEach((name) => el.dropzone.addEventListener(name, onDrag));
     ["dragleave", "drop"].forEach((name) => el.dropzone.addEventListener(name, offDrag));
     el.dropzone.addEventListener("drop", (event) => readFiles(event.dataTransfer.files));
@@ -94,29 +91,8 @@
     el.relax.addEventListener("input", previewMeshFromControls);
     window.addEventListener("resize", requestDraw);
     updateCommands();
-    checkServerCapabilities().then(loadCase);
+    loadCase();
     requestDraw();
-  }
-
-  async function checkServerCapabilities() {
-    try {
-      const health = await fetchJson("/api/health");
-      state.postApiAvailable = Boolean(health.post_api);
-      if (!state.postApiAvailable) {
-        setStatus("This console server is old. Restart: Ctrl+C, then python -B picar_console.py");
-      }
-    } catch (err) {
-      state.postApiAvailable = false;
-      setStatus("Could not verify console API. Restart: Ctrl+C, then python -B picar_console.py");
-    }
-    setWriteButtonsEnabled(state.postApiAvailable);
-  }
-
-  function setWriteButtonsEnabled(enabled) {
-    [el.saveMeshInput, el.generateMesh, el.importGeometry, el.appendGeometry, el.exportStl].forEach((button) => {
-      button.disabled = !enabled;
-      button.title = enabled ? "" : "Restart the Python console server to enable file writes.";
-    });
   }
 
   async function loadCase() {
@@ -159,56 +135,23 @@
 
   async function readFiles(files) {
     for (const file of Array.from(files)) {
+      const text = await file.text();
       const lower = file.name.toLowerCase();
       if (lower.includes("unstruc_surface")) {
-        const text = await file.text();
         state.surface = parseSurface(text);
       } else if (lower.endsWith(".stl")) {
-        state.surface = await parseStlFile(file);
-        setStatus(`STL preview loaded: ${file.name}`);
-      } else if (isMeshInputName(lower)) {
-        const params = parseMeshInputText(await file.text());
-        fillMeshControls(params);
-        state.meshControlsReady = true;
-        previewMeshFromControls();
-        setStatus(`Mesh input loaded: ${file.name}`);
+        setStatus("STL selected. Use Geometry > Import or Append STL.");
       } else if (lower.startsWith("xgrid")) {
-        const text = await file.text();
         state.mesh.x = parseGridAxis(text);
       } else if (lower.startsWith("ygrid")) {
-        const text = await file.text();
         state.mesh.y = parseGridAxis(text);
       } else if (lower.startsWith("zgrid")) {
-        const text = await file.text();
         state.mesh.z = parseGridAxis(text);
       }
     }
-    updateMeshControlsFromImportedGrid();
     recomputeBounds();
     fit();
     updateStats();
-  }
-
-  async function previewGeometrySelection() {
-    const file = el.geometryFile.files && el.geometryFile.files[0];
-    if (!file) return;
-    const lower = file.name.toLowerCase();
-    try {
-      if (lower.endsWith(".stl")) {
-        state.surface = await parseStlFile(file);
-      } else if (lower.endsWith(".dat")) {
-        state.surface = parseSurface(await file.text());
-      } else {
-        setStatus("Geometry preview supports .stl and .dat.");
-        return;
-      }
-      recomputeBounds();
-      fit();
-      updateStats();
-      setStatus(`Geometry preview loaded: ${file.name}`);
-    } catch (err) {
-      setStatus(`Geometry preview failed: ${err.message || err}`);
-    }
   }
 
   async function loadMeshInputControls() {
@@ -243,13 +186,7 @@
       ["y", "Y Axis", "bottom", "top", "y"],
       ["z", "Z Axis", "front", "back", "z"],
     ];
-    el.meshAxes.innerHTML = `
-      <div class="axis-tabs">
-        <button class="active" data-axis-tab="x" type="button">X</button>
-        <button data-axis-tab="y" type="button">Y</button>
-        <button data-axis-tab="z" type="button">Z</button>
-      </div>
-      ${defs.map(([axis, title, lowName, highName]) => `
+    el.meshAxes.innerHTML = defs.map(([axis, title, lowName, highName]) => `
       <section class="axis-group" data-axis="${axis}">
         <h3>${title}</h3>
         <div class="grid four">
@@ -271,27 +208,20 @@
           <label>Ratio<input id="${axis}Ratio" type="number" min="0.0001" step="0.01"></label>
         </div>
       </section>
-    `).join("")}`;
-    el.meshAxes.querySelectorAll("[data-axis-tab]").forEach((button) => {
-      button.addEventListener("click", () => selectAxisTab(button.dataset.axisTab));
-    });
+    `).join("");
     el.meshAxes.querySelectorAll("input").forEach((input) => input.addEventListener("input", previewMeshFromControls));
-    selectAxisTab("x");
   }
 
   function fillMeshControls(params) {
     state.meshPreviewSuspended = true;
     const p = params || {};
-    const xStart = state.mesh.x && state.mesh.x.length ? state.mesh.x[0] : 0;
-    const yStart = state.mesh.y && state.mesh.y.length ? state.mesh.y[0] : 0;
-    const zStart = state.mesh.z && state.mesh.z.length ? state.mesh.z[0] : 0;
     el.scaleRef.value = p.scale_ref ?? 1;
     el.relax.value = p.relax ?? 0.001;
     fillAxis("x", {
-      start: xStart,
-      denseStart: xStart + (p.x_center_dense ?? 12) - 0.5 * (p.Lx_dense ?? 8),
-      denseEnd: xStart + (p.x_center_dense ?? 12) + 0.5 * (p.Lx_dense ?? 8),
-      end: xStart + (p.Lx ?? 24),
+      start: 0,
+      denseStart: (p.x_center_dense ?? 12) - 0.5 * (p.Lx_dense ?? 8),
+      denseEnd: (p.x_center_dense ?? 12) + 0.5 * (p.Lx_dense ?? 8),
+      end: p.Lx ?? 24,
       leftStretch: p.n_left_stretch ?? 16,
       leftUniform: p.n_left_uniform ?? 8,
       denseCount: p.Nx_dense ?? 64,
@@ -302,10 +232,10 @@
       ratio: p.r_left ?? p.r_right ?? 1.08,
     });
     fillAxis("y", {
-      start: yStart,
-      denseStart: yStart + (p.y_center_dense ?? 10) - 0.5 * (p.Ly_dense ?? 6),
-      denseEnd: yStart + (p.y_center_dense ?? 10) + 0.5 * (p.Ly_dense ?? 6),
-      end: yStart + (p.Ly ?? 20),
+      start: 0,
+      denseStart: (p.y_center_dense ?? 10) - 0.5 * (p.Ly_dense ?? 6),
+      denseEnd: (p.y_center_dense ?? 10) + 0.5 * (p.Ly_dense ?? 6),
+      end: p.Ly ?? 20,
       leftStretch: p.n_bottom_stretch ?? 16,
       leftUniform: p.n_bottom_uniform ?? 8,
       denseCount: p.Ny_dense ?? 48,
@@ -316,10 +246,10 @@
       ratio: p.r_bottom ?? p.r_top ?? 1.06,
     });
     fillAxis("z", {
-      start: zStart,
-      denseStart: zStart + (p.z_center_dense ?? 0) - 0.5 * (p.Lz_dense ?? 0),
-      denseEnd: zStart + (p.z_center_dense ?? 0) + 0.5 * (p.Lz_dense ?? 0),
-      end: zStart + (p.Lz ?? 0),
+      start: 0,
+      denseStart: (p.z_center_dense ?? 0) - 0.5 * (p.Lz_dense ?? 0),
+      denseEnd: (p.z_center_dense ?? 0) + 0.5 * (p.Lz_dense ?? 0),
+      end: p.Lz ?? 0,
       leftStretch: p.n_front_stretch ?? 0,
       leftUniform: p.n_front_uniform ?? 0,
       denseCount: p.Nz_dense ?? 0,
@@ -330,15 +260,6 @@
       ratio: p.r_front ?? p.r_back ?? 1,
     });
     state.meshPreviewSuspended = false;
-  }
-
-  function selectAxisTab(axis) {
-    el.meshAxes.querySelectorAll("[data-axis-tab]").forEach((button) => {
-      button.classList.toggle("active", button.dataset.axisTab === axis);
-    });
-    el.meshAxes.querySelectorAll(".axis-group").forEach((group) => {
-      group.classList.toggle("active", group.dataset.axis === axis);
-    });
   }
 
   function fillAxis(axis, values) {
@@ -362,16 +283,13 @@
     });
   }
 
-  function readMeshParams(options = {}) {
-    const validate = options.validate !== false;
+  function readMeshParams() {
     const x = readAxisControls("x");
     const y = readAxisControls("y");
     const z = readAxisControls("z");
-    if (validate) {
-      validateAxisControls("x", x);
-      validateAxisControls("y", y);
-      if (z.end > z.start || z.denseCount > 0) validateAxisControls("z", z, true);
-    }
+    validateAxisControls("x", x);
+    validateAxisControls("y", y);
+    if (z.end > z.start || z.denseCount > 0) validateAxisControls("z", z, true);
     return {
       scale_ref: numValue(el.scaleRef, 1),
       Lx: x.end - x.start,
@@ -437,19 +355,16 @@
     if (state.meshPreviewSuspended || !state.meshControlsReady || !meshControlsHaveValues()) return;
     try {
       const params = readMeshParams();
-      const x = readAxisControls("x");
-      const y = readAxisControls("y");
-      const z = readAxisControls("z");
       state.mesh.x = makeAxisNodesFromControls("x");
       state.mesh.y = makeAxisNodesFromControls("y");
-      state.mesh.z = z.end > z.start ? makeAxisNodesFromControls("z") : null;
+      state.mesh.z = params.Lz > 0 && params.Nz_dense > 0 ? makeAxisNodesFromControls("z") : null;
       state.mesh.denseBox = {
-        x0: x.denseStart,
-        x1: x.denseEnd,
-        y0: y.denseStart,
-        y1: y.denseEnd,
-        z0: z.denseStart,
-        z1: z.denseEnd,
+        x0: params.x_center_dense - 0.5 * params.Lx_dense,
+        x1: params.x_center_dense + 0.5 * params.Lx_dense,
+        y0: params.y_center_dense - 0.5 * params.Ly_dense,
+        y1: params.y_center_dense + 0.5 * params.Ly_dense,
+        z0: params.z_center_dense - 0.5 * params.Lz_dense,
+        z1: params.z_center_dense + 0.5 * params.Lz_dense,
       };
       recomputeBounds();
       updateStats();
@@ -544,29 +459,21 @@
   }
 
   async function saveMeshInput() {
-    try {
-      await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), input_name: MESH_INPUT_NAME, params: readMeshParams({ validate: false }) });
-      setStatus(`${MESH_INPUT_NAME} saved. Use Generate XYZ to check whether it can produce grid files.`);
-      await loadCase();
-    } catch (err) {
-      setStatus(`Save input failed: ${err.message || err}`);
-    }
+    await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+    setStatus("Mesh input saved.");
+    await loadCase();
   }
 
   async function generateMesh() {
-    try {
-      const result = await postJson("/api/mesh/generate", { case_dir: el.caseDir.value.trim(), input_name: MESH_INPUT_NAME, params: readMeshParams() });
-      if (result.mesh) {
-        state.mesh.x = Float64Array.from(result.mesh.x);
-        state.mesh.y = Float64Array.from(result.mesh.y);
-        state.mesh.z = result.mesh.z.length ? Float64Array.from(result.mesh.z) : null;
-      }
-      recomputeBounds();
-      requestDraw();
-      setStatus("xgrid/ygrid/zgrid generated.");
-    } catch (err) {
-      setStatus(`Generate XYZ failed: ${err.message || err}`);
+    const result = await postJson("/api/mesh/generate", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+    if (result.mesh) {
+      state.mesh.x = Float64Array.from(result.mesh.x);
+      state.mesh.y = Float64Array.from(result.mesh.y);
+      state.mesh.z = result.mesh.z.length ? Float64Array.from(result.mesh.z) : null;
     }
+    recomputeBounds();
+    requestDraw();
+    setStatus("xgrid/ygrid/zgrid generated.");
   }
 
   async function importGeometry(append) {
@@ -575,38 +482,29 @@
       setStatus("Choose a .stl or .dat file first.");
       return;
     }
-    try {
-      setStatus(`Importing geometry: ${file.name}`);
-      const lower = file.name.toLowerCase();
-      if (lower.endsWith(".dat")) {
-        const content = await file.text();
-        await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
-      } else if (lower.endsWith(".stl")) {
-        const contentBase64 = await fileToBase64(file);
-        await postJson("/api/geometry/import-stl", {
-          case_dir: el.caseDir.value.trim(),
-          filename: file.name,
-          content_base64: contentBase64,
-          append,
-        });
-      } else {
-        setStatus("Geometry import supports .stl and .dat.");
-        return;
-      }
-      await loadCase();
-      setStatus(append ? "Geometry appended." : "Geometry imported.");
-    } catch (err) {
-      setStatus(`Geometry import failed: ${err.message || err}`);
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".dat")) {
+      const content = await file.text();
+      await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
+    } else if (lower.endsWith(".stl")) {
+      const contentBase64 = await fileToBase64(file);
+      await postJson("/api/geometry/import-stl", {
+        case_dir: el.caseDir.value.trim(),
+        filename: file.name,
+        content_base64: contentBase64,
+        append,
+      });
+    } else {
+      setStatus("Geometry import supports .stl and .dat.");
+      return;
     }
+    await loadCase();
+    setStatus(append ? "Geometry appended." : "Geometry imported.");
   }
 
   async function exportStl() {
-    try {
-      const result = await postJson("/api/geometry/export-stl", { case_dir: el.caseDir.value.trim(), output: "surface_export.stl" });
-      setStatus(`STL exported: ${result.path}`);
-    } catch (err) {
-      setStatus(`STL export failed: ${err.message || err}`);
-    }
+    const result = await postJson("/api/geometry/export-stl", { case_dir: el.caseDir.value.trim(), output: "surface_export.stl" });
+    setStatus(`STL exported: ${result.path}`);
   }
 
   function fileToBase64(file) {
@@ -648,56 +546,6 @@
     return { bodies };
   }
 
-  async function parseStlFile(file) {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    if (looksLikeBinaryStl(bytes)) return parseBinaryStl(bytes);
-    const text = new TextDecoder("utf-8").decode(bytes);
-    return parseAsciiStl(text);
-  }
-
-  function looksLikeBinaryStl(bytes) {
-    if (bytes.length < 84) return false;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const triangles = view.getUint32(80, true);
-    return 84 + triangles * 50 === bytes.length;
-  }
-
-  function parseBinaryStl(bytes) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const triangles = view.getUint32(80, true);
-    const points = new Float64Array(triangles * 9);
-    const elems = new Int32Array(triangles * 3);
-    let offset = 84;
-    for (let tri = 0; tri < triangles; tri += 1) {
-      offset += 12;
-      for (let corner = 0; corner < 3; corner += 1) {
-        const idx = tri * 9 + corner * 3;
-        points[idx] = view.getFloat32(offset, true);
-        points[idx + 1] = view.getFloat32(offset + 4, true);
-        points[idx + 2] = view.getFloat32(offset + 8, true);
-        elems[tri * 3 + corner] = tri * 3 + corner;
-        offset += 12;
-      }
-      offset += 2;
-    }
-    return { bodies: [{ points, elems, nodeCount: triangles * 3, elemCount: triangles }] };
-  }
-
-  function parseAsciiStl(text) {
-    const matches = Array.from(text.matchAll(/vertex\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)/gi));
-    if (matches.length < 3 || matches.length % 3 !== 0) throw new Error("Could not parse STL vertices");
-    const points = new Float64Array(matches.length * 3);
-    const elems = new Int32Array(matches.length);
-    matches.forEach((match, i) => {
-      points[i * 3] = Number(match[1].replace(/[dD]/, "E"));
-      points[i * 3 + 1] = Number(match[2].replace(/[dD]/, "E"));
-      points[i * 3 + 2] = Number(match[3].replace(/[dD]/, "E"));
-      elems[i] = i;
-    });
-    return { bodies: [{ points, elems, nodeCount: matches.length, elemCount: matches.length / 3 }] };
-  }
-
   function parseGridAxis(text) {
     const values = [];
     text.split(/\r?\n/).forEach((line) => {
@@ -706,145 +554,6 @@
       if (parts.length >= 2) values.push(Number(parts[1]));
     });
     return Float64Array.from(values.filter(Number.isFinite));
-  }
-
-  function isMeshInputName(lowerName) {
-    return lowerName.includes("mesh_input") || lowerName.includes("input_mesh") || lowerName === MESH_INPUT_NAME;
-  }
-
-  function parseMeshInputText(text) {
-    const values = [];
-    text.split(/\r?\n/).forEach((raw) => {
-      const line = raw.split("!", 1)[0].trim();
-      if (!line) return;
-      const parts = line.split(/\s+/);
-      if (parts.length === 1) values.push(parseMeshScalar(parts[0]));
-    });
-    if (values.length >= 40) return meshParamsFromValues(values, false);
-    if (values.length >= 28) return meshParamsFromValues(values, true);
-    throw new Error(`Mesh input has ${values.length} scalar values; expected at least 28.`);
-  }
-
-  function parseMeshScalar(value) {
-    const lowered = value.toLowerCase();
-    if (["t", "true", ".true."].includes(lowered)) return true;
-    if (["f", "false", ".false."].includes(lowered)) return false;
-    const number = Number(value.replace(/[dD]/, "E"));
-    return Number.isFinite(number) ? number : value;
-  }
-
-  function meshParamsFromValues(values, twolayer2d) {
-    if (!twolayer2d) {
-      const keys = [
-        "scale_ref", "Lx", "Ly", "Lz", "x_center_dense", "y_center_dense", "z_center_dense",
-        "Lx_dense", "Ly_dense", "Lz_dense", "Nx_dense", "Ny_dense", "Nz_dense",
-        "len_left", "len_right", "len_bottom", "len_top", "len_front", "len_back",
-        "n_left_stretch", "n_left_uniform", "n_right_uniform", "n_right_stretch",
-        "n_bottom_stretch", "n_bottom_uniform", "n_top_uniform", "n_top_stretch",
-        "n_front_stretch", "n_front_uniform", "n_back_uniform", "n_back_stretch",
-        "r_left", "r_right", "r_bottom", "r_top", "r_front", "r_back", "relax", "flag_plot", "flag_preplot",
-      ];
-      return Object.fromEntries(keys.map((key, i) => [key, values[i]]));
-    }
-    const p = defaultMeshParams();
-    [
-      p.scale_ref, p.Lx, p.Ly, p.x_center_dense, p.y_center_dense, p.Lx_dense, p.Ly_dense,
-      p.Nx_dense, p.Ny_dense, p.len_left, p.len_right, p.len_bottom, p.len_top,
-      p.n_left_stretch, p.n_left_uniform, p.n_right_uniform, p.n_right_stretch,
-      p.n_bottom_stretch, p.n_bottom_uniform, p.n_top_uniform, p.n_top_stretch,
-      p.r_left, p.r_right, p.r_bottom, p.r_top, p.relax, p.flag_plot, p.flag_preplot,
-    ] = values.slice(0, 28);
-    p.Lz = 0;
-    p.Lz_dense = 0;
-    p.Nz_dense = 0;
-    return p;
-  }
-
-  function updateMeshControlsFromImportedGrid() {
-    if (!state.mesh.x || !state.mesh.y) return;
-    const params = paramsFromCurrentGrid();
-    fillMeshControls(params);
-    state.meshControlsReady = true;
-  }
-
-  function paramsFromCurrentGrid() {
-    const x = axisParamsFromValues(state.mesh.x, "x");
-    const y = axisParamsFromValues(state.mesh.y, "y");
-    const z = state.mesh.z && state.mesh.z.length > 1 ? axisParamsFromValues(state.mesh.z, "z") : null;
-    const p = defaultMeshParams();
-    Object.assign(p, {
-      Lx: x.length,
-      Ly: y.length,
-      Lz: z ? z.length : 0,
-      x_center_dense: x.center,
-      y_center_dense: y.center,
-      z_center_dense: z ? z.center : 0,
-      Lx_dense: x.denseLength,
-      Ly_dense: y.denseLength,
-      Lz_dense: z ? z.denseLength : 0,
-      Nx_dense: x.denseCount,
-      Ny_dense: y.denseCount,
-      Nz_dense: z ? z.denseCount : 0,
-      n_left_stretch: x.leftStretch,
-      n_left_uniform: x.leftUniform,
-      n_right_uniform: x.rightUniform,
-      n_right_stretch: x.rightStretch,
-      n_bottom_stretch: y.leftStretch,
-      n_bottom_uniform: y.leftUniform,
-      n_top_uniform: y.rightUniform,
-      n_top_stretch: y.rightStretch,
-      n_front_stretch: z ? z.leftStretch : 0,
-      n_front_uniform: z ? z.leftUniform : 0,
-      n_back_uniform: z ? z.rightUniform : 0,
-      n_back_stretch: z ? z.rightStretch : 0,
-      len_left: x.leftLayer,
-      len_right: x.rightLayer,
-      len_bottom: y.leftLayer,
-      len_top: y.rightLayer,
-      len_front: z ? z.leftLayer : 0,
-      len_back: z ? z.rightLayer : 0,
-    });
-    return p;
-  }
-
-  function axisParamsFromValues(values) {
-    const start = values[0];
-    const end = values[values.length - 1];
-    const length = end - start;
-    const spacing = [];
-    for (let i = 0; i < values.length - 1; i += 1) spacing.push(values[i + 1] - values[i]);
-    const minSpacing = Math.min(...spacing.filter((v) => v > 0));
-    const denseMask = spacing.map((v) => v <= minSpacing * 1.08);
-    let bestStart = 0;
-    let bestEnd = spacing.length - 1;
-    let runStart = -1;
-    for (let i = 0; i < denseMask.length; i += 1) {
-      if (denseMask[i] && runStart < 0) runStart = i;
-      if ((!denseMask[i] || i === denseMask.length - 1) && runStart >= 0) {
-        const runEnd = denseMask[i] && i === denseMask.length - 1 ? i : i - 1;
-        if (runEnd - runStart > bestEnd - bestStart || bestEnd === spacing.length - 1) {
-          bestStart = runStart;
-          bestEnd = runEnd;
-        }
-        runStart = -1;
-      }
-    }
-    const denseStart = values[bestStart] ?? start;
-    const denseEnd = values[Math.min(bestEnd + 1, values.length - 1)] ?? end;
-    const leftIntervals = bestStart;
-    const rightIntervals = Math.max(0, spacing.length - bestEnd - 1);
-    return {
-      length,
-      center: 0.5 * (denseStart + denseEnd) - start,
-      denseLength: Math.max(0, denseEnd - denseStart),
-      denseCount: Math.max(1, bestEnd - bestStart + 1),
-      leftStretch: leftIntervals,
-      leftUniform: 0,
-      rightUniform: 0,
-      rightStretch: rightIntervals,
-      leftLayer: 0,
-      rightLayer: 0,
-    };
   }
 
   function numericTokens(text) {
@@ -1318,22 +1027,13 @@
   }
 
   async function postJson(url, payload) {
-    if (!state.postApiAvailable) {
-      throw new Error("Console write API is not available. Restart the server: Ctrl+C, then python -B picar_console.py");
-    }
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch (err) {
-      const snippet = text.trim().slice(0, 120).replace(/\s+/g, " ");
-      throw new Error(`Console server returned HTML/text instead of JSON. Restart the server. Response: ${snippet}`);
-    }
+    const data = text ? JSON.parse(text) : {};
     if (!res.ok || data.ok === false) throw new Error(data.error || text || res.statusText);
     return data;
   }

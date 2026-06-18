@@ -23,13 +23,6 @@ from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mes
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup5"
-DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
-MESH_INPUT_CANDIDATES = (
-    "mesh_input_twolayers.dat",
-    "input_mesh_twolayers.dat",
-    "mesh_input.dat",
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,7 +64,7 @@ def make_handler(default_case_dir: Path):
         def _handle_api(self, path: str, query: dict[str, list[str]]) -> None:
             try:
                 if path == "/api/health":
-                    self._send_json({"app": "Picar Console", "ok": True, "api_version": CONSOLE_API_VERSION, "post_api": True})
+                    self._send_json({"app": "Picar Console", "ok": True})
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
                 elif path == "/api/mesh-input":
@@ -144,11 +137,11 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "mesh": _mesh_payload(mesh), "input_text": format_mesh_input(params)}
     if path == "/api/mesh/save":
         params = _payload_mesh_params(payload)
-        out = write_mesh_input(case_dir / str(payload.get("input_name") or DEFAULT_MESH_INPUT_NAME), params)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
         return {"ok": True, "path": str(out), "input_text": format_mesh_input(params)}
     if path == "/api/mesh/generate":
         params = _payload_mesh_params(payload)
-        out = write_mesh_input(case_dir / str(payload.get("input_name") or DEFAULT_MESH_INPUT_NAME), params)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
         mesh = generate_mesh(params)
         write_mesh(case_dir, mesh, include_index=True)
         return {"ok": True, "input_path": str(out), "mesh": _mesh_payload(mesh), "report": _case_report(case_dir)}
@@ -233,15 +226,13 @@ def _case_report(case_dir: Path) -> dict[str, object]:
 
 
 def _mesh_input_payload(case_dir: Path) -> dict[str, object]:
-    for input_path in _mesh_input_paths(case_dir):
-        if not input_path.exists():
-            continue
+    input_path = case_dir / "input.dat"
+    if input_path.exists():
         try:
             params = read_mesh_input(input_path)
-            return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": input_path.name}
+            return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": "input"}
         except Exception:
-            continue
-    input_path = case_dir / DEFAULT_MESH_INPUT_NAME
+            pass
     if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
         mesh = read_mesh(case_dir, require_z=False)
         params = _params_from_existing_mesh(mesh)
@@ -271,9 +262,9 @@ def _params_from_existing_mesh(mesh) -> dict[str, object]:
             "Lx": x1 - x0,
             "Ly": y1 - y0,
             "Lz": max(0.0, z1 - z0),
-            "x_center_dense": 0.5 * (x1 - x0),
-            "y_center_dense": 0.5 * (y1 - y0),
-            "z_center_dense": 0.5 * max(0.0, z1 - z0),
+            "x_center_dense": 0.5 * (x0 + x1),
+            "y_center_dense": 0.5 * (y0 + y1),
+            "z_center_dense": 0.5 * (z0 + z1),
             "Lx_dense": max((x1 - x0) * 0.4, 1e-6),
             "Ly_dense": max((y1 - y0) * 0.4, 1e-6),
             "Lz_dense": max((z1 - z0) * 0.4, 0.0),
@@ -331,16 +322,12 @@ def _default_mesh_params() -> dict[str, object]:
 
 
 def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
-    params = None
-    for input_path in _mesh_input_paths(case_dir):
-        if not input_path.exists():
-            continue
-        try:
-            params = read_mesh_input(input_path)
-            break
-        except Exception:
-            continue
-    if params is None:
+    input_path = case_dir / "input.dat"
+    if not input_path.exists():
+        return None
+    try:
+        params = read_mesh_input(input_path)
+    except Exception:
         return None
     x0 = float(params["x_center_dense"]) - 0.5 * float(params["Lx_dense"])
     x1 = float(params["x_center_dense"]) + 0.5 * float(params["Lx_dense"])
@@ -353,10 +340,6 @@ def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
         z0 = 0.0
         z1 = 0.0
     return {"x0": x0, "x1": x1, "y0": y0, "y1": y1, "z0": z0, "z1": z1}
-
-
-def _mesh_input_paths(case_dir: Path) -> list[Path]:
-    return [case_dir / name for name in MESH_INPUT_CANDIDATES]
 
 
 def _json_ready(value):

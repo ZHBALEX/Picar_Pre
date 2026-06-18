@@ -21,7 +21,7 @@ input {
 
 .shell {
   display: grid;
-  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -148,32 +148,16 @@ h2 {
 }
 
 .axis-group {
-  display: none;
+  display: grid;
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid #dce3e8;
-}
-
-.axis-group.active {
-  display: grid;
 }
 
 .axis-group h3 {
   margin: 0;
   font-size: 13px;
   color: #25313d;
-}
-
-.axis-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  margin: 2px 0 8px;
-}
-
-.axis-tabs button {
-  padding: 7px 8px;
-  font-size: 13px;
 }
 
 .hint {
@@ -196,12 +180,6 @@ button:hover,
 button.active {
   border-color: #176f83;
   background: #e8f4f6;
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  background: #eef1f3;
 }
 
 .dropzone {
