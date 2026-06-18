@@ -41,10 +41,12 @@ python -B picar_console.py example/generated_circle2d_case
 ```
 
 The console shows `unstruc_surface_in.dat` and
-`xgrid.dat`/`ygrid.dat`/`zgrid.dat` together. The default view is fast and
-case-oriented: surface points, mesh boundary, dense-region box, coordinate axes,
-and ticks. Optional layers can enable sampled full-grid lines and surface
-triangle overlays when you need more detail.
+`xgrid.dat`/`ygrid.dat`/`zgrid.dat` together when a full case is available, but
+the viewer is decoupled from complete case files: you can preview only an STL,
+only a surface DAT, only grid files, or a mesh setup currently being edited. The
+default view is fast and case-oriented: surface points, mesh boundary,
+dense-region box, coordinate axes, and ticks. Optional layers can enable sampled
+full-grid lines and surface triangle overlays when you need more detail.
 
 Console panels:
 
@@ -52,8 +54,9 @@ Console panels:
 - `Geometry`: import `.stl` or `unstruc_surface_in.dat`, append STL bodies,
   save the current surface file, and export triangulated surfaces back to STL.
 - `Mesh`: edit mesh-input parameters while the right-side scene updates live;
-  use `Save Input` to write `input.dat`, then `Generate XYZ` to write
-  `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
+  use `Save Input` to write `mesh_input_twolayers.dat`, then `Generate XYZ` to
+  write `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`. Solver `input.dat` is not
+  overwritten by the console mesh setup.
 - `Fort`: reserved for prescribed-motion tools after the geometry/mesh setup
   workflow is stable.
 

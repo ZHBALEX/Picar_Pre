@@ -51,8 +51,9 @@ one shared 3D scene. The default view is performance-oriented: surface points,
 mesh boundary, dense-region box, and coordinate axes/ticks. Sampled full-grid
 and surface-triangle overlays are optional layers. The Geometry panel can import
 surface/STL files, and the Mesh panel can edit mesh-input parameters, save
-`input.dat`, and generate `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`. If the
-preferred port is already occupied, the launcher prints the next free local URL.
+`mesh_input_twolayers.dat`, and generate `xgrid.dat`, `ygrid.dat`, and
+`zgrid.dat` without overwriting solver `input.dat`. If the preferred port is
+already occupied, the launcher prints the next free local URL.
 
 ## One-File Example
 
