@@ -21,11 +21,23 @@
     showDenseRegion: document.getElementById("showDenseRegion"),
     showFullMesh: document.getElementById("showFullMesh"),
     showAxes: document.getElementById("showAxes"),
+    geometryFile: document.getElementById("geometryFile"),
+    importGeometry: document.getElementById("importGeometry"),
+    appendGeometry: document.getElementById("appendGeometry"),
+    exportStl: document.getElementById("exportStl"),
+    meshAxes: document.getElementById("meshAxes"),
+    scaleRef: document.getElementById("scaleRef"),
+    relax: document.getElementById("relax"),
+    previewMesh: document.getElementById("previewMesh"),
+    saveMeshInput: document.getElementById("saveMeshInput"),
+    generateMesh: document.getElementById("generateMesh"),
   };
 
   const state = {
     surface: null,
     mesh: { x: null, y: null, z: null, denseBox: null },
+    meshControlsReady: false,
+    meshPreviewSuspended: false,
     bounds: null,
     angleX: -0.55,
     angleY: 0.72,
@@ -43,6 +55,12 @@
   function init() {
     const params = new URLSearchParams(location.search);
     el.caseDir.value = params.get("case_dir") || "";
+    buildMeshControls();
+    fillMeshControls(defaultMeshParams());
+    state.meshControlsReady = true;
+    document.querySelectorAll("[data-panel]").forEach((button) => {
+      button.addEventListener("click", () => selectPanel(button.dataset.panel));
+    });
     el.loadCase.addEventListener("click", loadCase);
     el.fitView.addEventListener("click", fit);
     el.topView.addEventListener("click", topView);
@@ -63,6 +81,14 @@
     window.addEventListener("mousemove", drag);
     window.addEventListener("mouseup", () => { state.dragging = false; });
     el.viewport.addEventListener("wheel", zoom, { passive: false });
+    el.importGeometry.addEventListener("click", () => importGeometry(false));
+    el.appendGeometry.addEventListener("click", () => importGeometry(true));
+    el.exportStl.addEventListener("click", exportStl);
+    el.previewMesh.addEventListener("click", previewMeshFromControls);
+    el.saveMeshInput.addEventListener("click", saveMeshInput);
+    el.generateMesh.addEventListener("click", generateMesh);
+    el.scaleRef.addEventListener("input", previewMeshFromControls);
+    el.relax.addEventListener("input", previewMeshFromControls);
     window.addEventListener("resize", requestDraw);
     updateCommands();
     loadCase();
@@ -97,6 +123,7 @@
       }
 
       await Promise.all(loads);
+      await loadMeshInputControls();
       recomputeBounds();
       fit();
       setStatus(formatReport(report));
@@ -112,6 +139,8 @@
       const lower = file.name.toLowerCase();
       if (lower.includes("unstruc_surface")) {
         state.surface = parseSurface(text);
+      } else if (lower.endsWith(".stl")) {
+        setStatus("STL selected. Use Geometry > Import or Append STL.");
       } else if (lower.startsWith("xgrid")) {
         state.mesh.x = parseGridAxis(text);
       } else if (lower.startsWith("ygrid")) {
@@ -123,6 +152,368 @@
     recomputeBounds();
     fit();
     updateStats();
+  }
+
+  async function loadMeshInputControls() {
+    try {
+      const query = `?case_dir=${encodeURIComponent(el.caseDir.value.trim())}`;
+      const payload = await fetchJson(`/api/mesh-input${query}`);
+      fillMeshControls(payload.params);
+      state.meshControlsReady = true;
+      previewMeshFromControls();
+    } catch (err) {
+      state.meshControlsReady = true;
+      fillMeshControls(defaultMeshParams());
+      setStatus(`Mesh input controls not loaded: ${err}`);
+    }
+  }
+
+  function selectPanel(panelId) {
+    document.querySelectorAll("[data-panel]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.panel === panelId);
+    });
+    document.querySelectorAll(".control-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.id === panelId);
+    });
+    if (panelId === "meshPanel" && !meshControlsHaveValues()) {
+      loadMeshInputControls();
+    }
+  }
+
+  function buildMeshControls() {
+    const defs = [
+      ["x", "X Axis", "left", "right", "x"],
+      ["y", "Y Axis", "bottom", "top", "y"],
+      ["z", "Z Axis", "front", "back", "z"],
+    ];
+    el.meshAxes.innerHTML = defs.map(([axis, title, lowName, highName]) => `
+      <section class="axis-group" data-axis="${axis}">
+        <h3>${title}</h3>
+        <div class="grid four">
+          <label>Start<input id="${axis}Start" type="number" step="0.01"></label>
+          <label>Dense start<input id="${axis}DenseStart" type="number" step="0.01"></label>
+          <label>Dense end<input id="${axis}DenseEnd" type="number" step="0.01"></label>
+          <label>End<input id="${axis}End" type="number" step="0.01"></label>
+        </div>
+        <div class="grid four">
+          <label>${lowName} stretch<input id="${axis}LeftStretch" type="number" min="0" step="1"></label>
+          <label>${lowName} layer<input id="${axis}LeftUniform" type="number" min="0" step="1"></label>
+          <label>Dense count<input id="${axis}DenseCount" type="number" min="0" step="1"></label>
+          <label>${highName} layer<input id="${axis}RightUniform" type="number" min="0" step="1"></label>
+        </div>
+        <div class="grid four">
+          <label>${highName} stretch<input id="${axis}RightStretch" type="number" min="0" step="1"></label>
+          <label>${lowName} length<input id="${axis}LeftLayerLength" type="number" min="0" step="0.01"></label>
+          <label>${highName} length<input id="${axis}RightLayerLength" type="number" min="0" step="0.01"></label>
+          <label>Ratio<input id="${axis}Ratio" type="number" min="0.0001" step="0.01"></label>
+        </div>
+      </section>
+    `).join("");
+    el.meshAxes.querySelectorAll("input").forEach((input) => input.addEventListener("input", previewMeshFromControls));
+  }
+
+  function fillMeshControls(params) {
+    state.meshPreviewSuspended = true;
+    const p = params || {};
+    el.scaleRef.value = p.scale_ref ?? 1;
+    el.relax.value = p.relax ?? 0.001;
+    fillAxis("x", {
+      start: 0,
+      denseStart: (p.x_center_dense ?? 12) - 0.5 * (p.Lx_dense ?? 8),
+      denseEnd: (p.x_center_dense ?? 12) + 0.5 * (p.Lx_dense ?? 8),
+      end: p.Lx ?? 24,
+      leftStretch: p.n_left_stretch ?? 16,
+      leftUniform: p.n_left_uniform ?? 8,
+      denseCount: p.Nx_dense ?? 64,
+      rightUniform: p.n_right_uniform ?? 8,
+      rightStretch: p.n_right_stretch ?? 16,
+      leftLayerLength: p.len_left ?? 1,
+      rightLayerLength: p.len_right ?? 1,
+      ratio: p.r_left ?? p.r_right ?? 1.08,
+    });
+    fillAxis("y", {
+      start: 0,
+      denseStart: (p.y_center_dense ?? 10) - 0.5 * (p.Ly_dense ?? 6),
+      denseEnd: (p.y_center_dense ?? 10) + 0.5 * (p.Ly_dense ?? 6),
+      end: p.Ly ?? 20,
+      leftStretch: p.n_bottom_stretch ?? 16,
+      leftUniform: p.n_bottom_uniform ?? 8,
+      denseCount: p.Ny_dense ?? 48,
+      rightUniform: p.n_top_uniform ?? 8,
+      rightStretch: p.n_top_stretch ?? 16,
+      leftLayerLength: p.len_bottom ?? 1,
+      rightLayerLength: p.len_top ?? 1,
+      ratio: p.r_bottom ?? p.r_top ?? 1.06,
+    });
+    fillAxis("z", {
+      start: 0,
+      denseStart: (p.z_center_dense ?? 0) - 0.5 * (p.Lz_dense ?? 0),
+      denseEnd: (p.z_center_dense ?? 0) + 0.5 * (p.Lz_dense ?? 0),
+      end: p.Lz ?? 0,
+      leftStretch: p.n_front_stretch ?? 0,
+      leftUniform: p.n_front_uniform ?? 0,
+      denseCount: p.Nz_dense ?? 0,
+      rightUniform: p.n_back_uniform ?? 0,
+      rightStretch: p.n_back_stretch ?? 0,
+      leftLayerLength: p.len_front ?? 0,
+      rightLayerLength: p.len_back ?? 0,
+      ratio: p.r_front ?? p.r_back ?? 1,
+    });
+    state.meshPreviewSuspended = false;
+  }
+
+  function fillAxis(axis, values) {
+    const map = {
+      Start: values.start,
+      DenseStart: values.denseStart,
+      DenseEnd: values.denseEnd,
+      End: values.end,
+      LeftStretch: values.leftStretch,
+      LeftUniform: values.leftUniform,
+      DenseCount: values.denseCount,
+      RightUniform: values.rightUniform,
+      RightStretch: values.rightStretch,
+      LeftLayerLength: values.leftLayerLength,
+      RightLayerLength: values.rightLayerLength,
+      Ratio: values.ratio,
+    };
+    Object.entries(map).forEach(([suffix, value]) => {
+      const input = document.getElementById(axis + suffix);
+      if (input) input.value = formatControlNumber(value);
+    });
+  }
+
+  function readMeshParams() {
+    const x = readAxisControls("x");
+    const y = readAxisControls("y");
+    const z = readAxisControls("z");
+    validateAxisControls("x", x);
+    validateAxisControls("y", y);
+    if (z.end > z.start || z.denseCount > 0) validateAxisControls("z", z, true);
+    return {
+      scale_ref: numValue(el.scaleRef, 1),
+      Lx: x.end - x.start,
+      Ly: y.end - y.start,
+      Lz: Math.max(0, z.end - z.start),
+      x_center_dense: 0.5 * (x.denseStart + x.denseEnd) - x.start,
+      y_center_dense: 0.5 * (y.denseStart + y.denseEnd) - y.start,
+      z_center_dense: Math.max(0, 0.5 * (z.denseStart + z.denseEnd) - z.start),
+      Lx_dense: x.denseEnd - x.denseStart,
+      Ly_dense: y.denseEnd - y.denseStart,
+      Lz_dense: Math.max(0, z.denseEnd - z.denseStart),
+      Nx_dense: x.denseCount,
+      Ny_dense: y.denseCount,
+      Nz_dense: z.denseCount,
+      len_left: x.leftLayerLength,
+      len_right: x.rightLayerLength,
+      len_bottom: y.leftLayerLength,
+      len_top: y.rightLayerLength,
+      len_front: z.leftLayerLength,
+      len_back: z.rightLayerLength,
+      n_left_stretch: x.leftStretch,
+      n_left_uniform: x.leftUniform,
+      n_right_uniform: x.rightUniform,
+      n_right_stretch: x.rightStretch,
+      n_bottom_stretch: y.leftStretch,
+      n_bottom_uniform: y.leftUniform,
+      n_top_uniform: y.rightUniform,
+      n_top_stretch: y.rightStretch,
+      n_front_stretch: z.leftStretch,
+      n_front_uniform: z.leftUniform,
+      n_back_uniform: z.rightUniform,
+      n_back_stretch: z.rightStretch,
+      r_left: x.ratio,
+      r_right: x.ratio,
+      r_bottom: y.ratio,
+      r_top: y.ratio,
+      r_front: z.ratio,
+      r_back: z.ratio,
+      relax: numValue(el.relax, 0.001),
+      flag_plot: false,
+      flag_preplot: false,
+    };
+  }
+
+  function readAxisControls(axis) {
+    return {
+      start: numId(axis + "Start"),
+      denseStart: numId(axis + "DenseStart"),
+      denseEnd: numId(axis + "DenseEnd"),
+      end: numId(axis + "End"),
+      leftStretch: intId(axis + "LeftStretch"),
+      leftUniform: intId(axis + "LeftUniform"),
+      denseCount: intId(axis + "DenseCount"),
+      rightUniform: intId(axis + "RightUniform"),
+      rightStretch: intId(axis + "RightStretch"),
+      leftLayerLength: numId(axis + "LeftLayerLength"),
+      rightLayerLength: numId(axis + "RightLayerLength"),
+      ratio: Math.max(1e-8, numId(axis + "Ratio")),
+    };
+  }
+
+  function previewMeshFromControls() {
+    if (state.meshPreviewSuspended || !state.meshControlsReady || !meshControlsHaveValues()) return;
+    try {
+      const params = readMeshParams();
+      state.mesh.x = makeAxisNodesFromControls("x");
+      state.mesh.y = makeAxisNodesFromControls("y");
+      state.mesh.z = params.Lz > 0 && params.Nz_dense > 0 ? makeAxisNodesFromControls("z") : null;
+      state.mesh.denseBox = {
+        x0: params.x_center_dense - 0.5 * params.Lx_dense,
+        x1: params.x_center_dense + 0.5 * params.Lx_dense,
+        y0: params.y_center_dense - 0.5 * params.Ly_dense,
+        y1: params.y_center_dense + 0.5 * params.Ly_dense,
+        z0: params.z_center_dense - 0.5 * params.Lz_dense,
+        z1: params.z_center_dense + 0.5 * params.Lz_dense,
+      };
+      recomputeBounds();
+      updateStats();
+      requestDraw();
+    } catch (err) {
+      setStatus(`Mesh preview error: ${err.message || err}`);
+    }
+  }
+
+  function validateAxisControls(axis, cfg, allowFlat = false) {
+    if (!Number.isFinite(cfg.start) || !Number.isFinite(cfg.end)) throw new Error(`${axis.toUpperCase()} range is incomplete`);
+    if (allowFlat && cfg.end === cfg.start && cfg.denseCount === 0) return;
+    if (!(cfg.end > cfg.start)) throw new Error(`${axis.toUpperCase()} end must be greater than start`);
+    if (!(cfg.denseStart >= cfg.start && cfg.denseEnd <= cfg.end && cfg.denseEnd >= cfg.denseStart)) {
+      throw new Error(`${axis.toUpperCase()} dense range must stay inside the axis range`);
+    }
+  }
+
+  function meshControlsHaveValues() {
+    return ["xStart", "xDenseStart", "xDenseEnd", "xEnd", "yStart", "yDenseStart", "yDenseEnd", "yEnd"]
+      .every((id) => {
+        const input = document.getElementById(id);
+        return input && String(input.value).trim() !== "";
+      });
+  }
+
+  function defaultMeshParams() {
+    return {
+      scale_ref: 1,
+      relax: 0.001,
+      Lx: 24,
+      Ly: 20,
+      Lz: 0,
+      x_center_dense: 12,
+      y_center_dense: 10,
+      z_center_dense: 0,
+      Lx_dense: 8,
+      Ly_dense: 6,
+      Lz_dense: 0,
+      Nx_dense: 64,
+      Ny_dense: 48,
+      Nz_dense: 0,
+      n_left_stretch: 16,
+      n_left_uniform: 8,
+      n_right_uniform: 8,
+      n_right_stretch: 16,
+      n_bottom_stretch: 16,
+      n_bottom_uniform: 8,
+      n_top_uniform: 8,
+      n_top_stretch: 16,
+      n_front_stretch: 0,
+      n_front_uniform: 0,
+      n_back_uniform: 0,
+      n_back_stretch: 0,
+      len_left: 1,
+      len_right: 1,
+      len_bottom: 1,
+      len_top: 1,
+      len_front: 0,
+      len_back: 0,
+      r_left: 1.08,
+      r_right: 1.08,
+      r_bottom: 1.06,
+      r_top: 1.06,
+      r_front: 1,
+      r_back: 1,
+    };
+  }
+
+  function makeAxisNodesFromControls(axis) {
+    const cfg = readAxisControls(axis);
+    if (cfg.end <= cfg.start) return Float64Array.from([cfg.start, cfg.end]);
+    const sizes = [
+      ...geometricSizes(Math.max(0, cfg.denseStart - cfg.start - cfg.leftLayerLength), cfg.leftStretch, cfg.ratio).reverse(),
+      ...geometricSizes(Math.max(0, cfg.leftLayerLength), cfg.leftUniform, 1),
+      ...geometricSizes(Math.max(0, cfg.denseEnd - cfg.denseStart), cfg.denseCount, 1),
+      ...geometricSizes(Math.max(0, cfg.rightLayerLength), cfg.rightUniform, 1),
+      ...geometricSizes(Math.max(0, cfg.end - cfg.denseEnd - cfg.rightLayerLength), cfg.rightStretch, cfg.ratio),
+    ];
+    const nodes = [cfg.start];
+    sizes.forEach((size) => nodes.push(nodes[nodes.length - 1] + size));
+    if (nodes.length === 1) nodes.push(cfg.end);
+    nodes[nodes.length - 1] = cfg.end;
+    return Float64Array.from(nodes);
+  }
+
+  function geometricSizes(length, count, ratio) {
+    if (count <= 0 || length <= 0) return [];
+    if (Math.abs(ratio - 1) < 1e-12) return Array(count).fill(length / count);
+    const first = length * (1 - ratio) / (1 - ratio ** count);
+    return Array.from({ length: count }, (_, i) => first * ratio ** i);
+  }
+
+  async function saveMeshInput() {
+    await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+    setStatus("Mesh input saved.");
+    await loadCase();
+  }
+
+  async function generateMesh() {
+    const result = await postJson("/api/mesh/generate", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+    if (result.mesh) {
+      state.mesh.x = Float64Array.from(result.mesh.x);
+      state.mesh.y = Float64Array.from(result.mesh.y);
+      state.mesh.z = result.mesh.z.length ? Float64Array.from(result.mesh.z) : null;
+    }
+    recomputeBounds();
+    requestDraw();
+    setStatus("xgrid/ygrid/zgrid generated.");
+  }
+
+  async function importGeometry(append) {
+    const file = el.geometryFile.files && el.geometryFile.files[0];
+    if (!file) {
+      setStatus("Choose a .stl or .dat file first.");
+      return;
+    }
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".dat")) {
+      const content = await file.text();
+      await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
+    } else if (lower.endsWith(".stl")) {
+      const contentBase64 = await fileToBase64(file);
+      await postJson("/api/geometry/import-stl", {
+        case_dir: el.caseDir.value.trim(),
+        filename: file.name,
+        content_base64: contentBase64,
+        append,
+      });
+    } else {
+      setStatus("Geometry import supports .stl and .dat.");
+      return;
+    }
+    await loadCase();
+    setStatus(append ? "Geometry appended." : "Geometry imported.");
+  }
+
+  async function exportStl() {
+    const result = await postJson("/api/geometry/export-stl", { case_dir: el.caseDir.value.trim(), output: "surface_export.stl" });
+    setStatus(`STL exported: ${result.path}`);
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   }
 
   function parseSurface(text) {
@@ -502,6 +893,25 @@
     return Math.abs(value) >= 100 || Math.abs(value) < 0.01 ? value.toExponential(1) : Number(value.toPrecision(4)).toString();
   }
 
+  function numId(id, fallback = 0) {
+    return numValue(document.getElementById(id), fallback);
+  }
+
+  function intId(id, fallback = 0) {
+    return Math.max(0, Math.floor(numId(id, fallback)));
+  }
+
+  function numValue(input, fallback = 0) {
+    const value = Number(input && input.value);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function formatControlNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "0";
+    return Number(number.toPrecision(10)).toString();
+  }
+
   function fit() {
     state.zoom = 1;
     state.panX = 0;
@@ -614,5 +1024,17 @@
 
   async function fetchJson(url) {
     return JSON.parse(await fetchText(url));
+  }
+
+  async function postJson(url, payload) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!res.ok || data.ok === false) throw new Error(data.error || text || res.statusText);
+    return data;
   }
 }());

@@ -8,9 +8,10 @@ the solver.
 
 ## Start Here: Picar Console
 
-The main entry point is the local visual console. It loads geometry and mesh into
-one shared 3D scene so the relative placement is easy to check before running a
-case.
+The main entry point is the local case-setup console. It combines case loading,
+geometry import/editing, mesh setup, grid generation, and visualization in one
+browser UI. The right side always shows geometry and mesh in one shared 3D scene
+so their relative placement is easy to check before running a case.
 
 From the repository root:
 
@@ -44,6 +45,17 @@ The console shows `unstruc_surface_in.dat` and
 case-oriented: surface points, mesh boundary, dense-region box, coordinate axes,
 and ticks. Optional layers can enable sampled full-grid lines and surface
 triangle overlays when you need more detail.
+
+Console panels:
+
+- `Setup`: load a case and control visualization layers.
+- `Geometry`: import `.stl` or `unstruc_surface_in.dat`, append STL bodies,
+  save the current surface file, and export triangulated surfaces back to STL.
+- `Mesh`: edit mesh-input parameters while the right-side scene updates live;
+  use `Save Input` to write `input.dat`, then `Generate XYZ` to write
+  `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
+- `Fort`: reserved for prescribed-motion tools after the geometry/mesh setup
+  workflow is stable.
 
 The toolkit currently focuses on the solid/body workflow:
 

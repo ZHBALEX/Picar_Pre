@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=setup2">
 </head>
 <body>
   <main class="shell">
@@ -18,12 +18,18 @@
         <button id="loadCase" type="button">Load Case</button>
         <button id="fitView" type="button">Fit</button>
       </div>
+      <nav class="mode-tabs">
+        <button class="active" data-panel="setupPanel" type="button">Setup</button>
+        <button data-panel="geometryPanel" type="button">Geometry</button>
+        <button data-panel="meshPanel" type="button">Mesh</button>
+        <button data-panel="fortPanel" type="button">Fort</button>
+      </nav>
       <section class="dropzone" id="dropzone">
         <input id="fileInput" type="file" multiple>
         <strong>Drop files here</strong>
         <span>xgrid/ygrid/zgrid.dat or unstruc_surface_in.dat</span>
       </section>
-      <section>
+      <section id="setupPanel" class="control-panel active">
         <h2>Scene Layers</h2>
         <div class="layer-list">
           <label><input id="showSurfacePoints" type="checkbox" checked> surface points</label>
@@ -33,6 +39,37 @@
           <label><input id="showFullMesh" type="checkbox"> sampled grid</label>
           <label><input id="showAxes" type="checkbox" checked> axes and ticks</label>
         </div>
+      </section>
+      <section id="geometryPanel" class="control-panel">
+        <h2>Geometry</h2>
+        <label class="field">
+          <span>STL / surface file</span>
+          <input id="geometryFile" type="file" accept=".stl,.dat">
+        </label>
+        <div class="actions">
+          <button id="importGeometry" type="button">Import</button>
+          <button id="appendGeometry" type="button">Append STL</button>
+          <button id="exportStl" type="button">Export STL</button>
+        </div>
+        <p class="hint">STL import writes `unstruc_surface_in.dat`; DAT import saves the dropped surface directly.</p>
+      </section>
+      <section id="meshPanel" class="control-panel">
+        <h2>Mesh Setup</h2>
+        <div class="grid two">
+          <label>Scale<input id="scaleRef" type="number" step="0.01"></label>
+          <label>Relax<input id="relax" type="number" step="0.0001"></label>
+        </div>
+        <div id="meshAxes"></div>
+        <div class="actions">
+          <button id="previewMesh" type="button">Preview</button>
+          <button id="saveMeshInput" type="button">Save Input</button>
+          <button id="generateMesh" type="button">Generate XYZ</button>
+        </div>
+        <p class="hint">Edits update the right-side preview before files are generated.</p>
+      </section>
+      <section id="fortPanel" class="control-panel">
+        <h2>Fort</h2>
+        <p class="hint">Fort/motion editing will be added after geometry and mesh setup are stable.</p>
       </section>
       <section>
         <h2>Commands</h2>
@@ -56,6 +93,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js"></script>
+  <script src="app.js?v=setup2"></script>
 </body>
 </html>

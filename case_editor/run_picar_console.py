@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import mimetypes
 import socket
@@ -15,8 +16,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from case_editor.case_project import CaseProject  # noqa: E402
+from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
 from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface  # noqa: E402
-from mesh.io import read_mesh, read_mesh_input, summarize_mesh, validate_mesh  # noqa: E402
+from mesh.generation import generate_mesh  # noqa: E402
+from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
@@ -43,6 +46,18 @@ def make_handler(default_case_dir: Path):
                 return
             self._serve_static(parsed.path)
 
+        def do_POST(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            if not parsed.path.startswith("/api/"):
+                self.send_error(404, "Unknown route")
+                return
+            try:
+                payload = self._read_json_body()
+                result = _handle_post_api(parsed.path, payload, default_case_dir)
+                self._send_json(result)
+            except Exception as exc:  # pragma: no cover - terminal server guard
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+
         def log_message(self, fmt: str, *args) -> None:
             return None
 
@@ -52,6 +67,9 @@ def make_handler(default_case_dir: Path):
                     self._send_json({"app": "Picar Console", "ok": True})
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
+                elif path == "/api/mesh-input":
+                    case_dir = _case_dir_from_query(query, default_case_dir)
+                    self._send_json(_mesh_input_payload(case_dir))
                 elif path == "/api/surface":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_file_text(case_dir / "unstruc_surface_in.dat")
@@ -77,8 +95,16 @@ def make_handler(default_case_dir: Path):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
+
+        def _read_json_body(self) -> dict[str, object]:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length)
+            if not raw:
+                return {}
+            return json.loads(raw.decode("utf-8"))
 
         def _send_file_text(self, path: Path) -> None:
             if not path.exists():
@@ -87,6 +113,7 @@ def make_handler(default_case_dir: Path):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
 
@@ -95,10 +122,50 @@ def make_handler(default_case_dir: Path):
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
 
     return PicarConsoleHandler
+
+
+def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Path) -> dict[str, object]:
+    case_dir = _payload_case_dir(payload, default_case_dir)
+    if path == "/api/mesh/preview":
+        params = _payload_mesh_params(payload)
+        mesh = generate_mesh(params, repair_degenerate=True)
+        return {"ok": True, "mesh": _mesh_payload(mesh), "input_text": format_mesh_input(params)}
+    if path == "/api/mesh/save":
+        params = _payload_mesh_params(payload)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
+        return {"ok": True, "path": str(out), "input_text": format_mesh_input(params)}
+    if path == "/api/mesh/generate":
+        params = _payload_mesh_params(payload)
+        out = write_mesh_input(case_dir / str(payload.get("input_name") or "input.dat"), params)
+        mesh = generate_mesh(params)
+        write_mesh(case_dir, mesh, include_index=True)
+        return {"ok": True, "input_path": str(out), "mesh": _mesh_payload(mesh), "report": _case_report(case_dir)}
+    if path == "/api/geometry/save-surface":
+        content = str(payload.get("content") or "")
+        out = case_dir / str(payload.get("surface_name") or "unstruc_surface_in.dat")
+        out.write_text(content, encoding="utf-8")
+        return {"ok": True, "path": str(out), "report": _case_report(case_dir)}
+    if path == "/api/geometry/import-stl":
+        filename = Path(str(payload.get("filename") or "uploaded.stl")).name
+        data_b64 = str(payload.get("content_base64") or "")
+        if not data_b64:
+            raise ValueError("Missing STL content")
+        case_dir.mkdir(parents=True, exist_ok=True)
+        stl_path = case_dir / filename
+        stl_path.write_bytes(base64.b64decode(data_b64))
+        project = SurfaceProject(case_dir)
+        out, bodies = project.convert_stl([stl_path], append=bool(payload.get("append")))
+        return {"ok": True, "stl_path": str(stl_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
+    if path == "/api/geometry/export-stl":
+        output = str(payload.get("output") or "surface_export.stl")
+        out, bodies = SurfaceProject(case_dir).export_stl(output=output)
+        return {"ok": True, "path": str(out), "bodies": len(bodies)}
+    raise ValueError(f"Unknown API route: {path}")
 
 
 def _case_dir_from_query(query: dict[str, list[str]], default_case_dir: Path) -> Path:
@@ -107,6 +174,21 @@ def _case_dir_from_query(query: dict[str, list[str]], default_case_dir: Path) ->
     if not path.is_absolute():
         path = REPO_ROOT / path
     return path.resolve()
+
+
+def _payload_case_dir(payload: dict[str, object], default_case_dir: Path) -> Path:
+    raw = str(payload.get("case_dir") or default_case_dir)
+    path = Path(raw)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path.resolve()
+
+
+def _payload_mesh_params(payload: dict[str, object]) -> dict[str, object]:
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        raise ValueError("Missing mesh params")
+    return params
 
 
 def _case_report(case_dir: Path) -> dict[str, object]:
@@ -141,6 +223,102 @@ def _case_report(case_dir: Path) -> dict[str, object]:
         }
 
     return payload
+
+
+def _mesh_input_payload(case_dir: Path) -> dict[str, object]:
+    input_path = case_dir / "input.dat"
+    if input_path.exists():
+        try:
+            params = read_mesh_input(input_path)
+            return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": "input"}
+        except Exception:
+            pass
+    if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
+        mesh = read_mesh(case_dir, require_z=False)
+        params = _params_from_existing_mesh(mesh)
+        return {"ok": True, "path": str(input_path), "params": _json_ready(params), "source": "inferred-grid"}
+    return {"ok": False, "path": str(input_path), "params": _json_ready(_default_mesh_params()), "source": "default"}
+
+
+def _mesh_payload(mesh) -> dict[str, object]:
+    return {
+        "x": mesh.x.values.tolist(),
+        "y": mesh.y.values.tolist(),
+        "z": mesh.z.values.tolist() if mesh.z is not None else [],
+        "summary": _json_ready(summarize_mesh(mesh)),
+    }
+
+
+def _params_from_existing_mesh(mesh) -> dict[str, object]:
+    x0, x1 = float(mesh.x.values[0]), float(mesh.x.values[-1])
+    y0, y1 = float(mesh.y.values[0]), float(mesh.y.values[-1])
+    if mesh.z is not None and mesh.z.count > 1:
+        z0, z1 = float(mesh.z.values[0]), float(mesh.z.values[-1])
+    else:
+        z0, z1 = 0.0, 0.0
+    params = _default_mesh_params()
+    params.update(
+        {
+            "Lx": x1 - x0,
+            "Ly": y1 - y0,
+            "Lz": max(0.0, z1 - z0),
+            "x_center_dense": 0.5 * (x0 + x1),
+            "y_center_dense": 0.5 * (y0 + y1),
+            "z_center_dense": 0.5 * (z0 + z1),
+            "Lx_dense": max((x1 - x0) * 0.4, 1e-6),
+            "Ly_dense": max((y1 - y0) * 0.4, 1e-6),
+            "Lz_dense": max((z1 - z0) * 0.4, 0.0),
+            "Nx_dense": max(1, min(mesh.x.count - 1, max(8, (mesh.x.count - 1) // 2))),
+            "Ny_dense": max(1, min(mesh.y.count - 1, max(8, (mesh.y.count - 1) // 2))),
+            "Nz_dense": max(0, min((mesh.z.count - 1 if mesh.z is not None else 0), max(1, ((mesh.z.count - 1) // 2 if mesh.z is not None else 0)))),
+        }
+    )
+    return params
+
+
+def _default_mesh_params() -> dict[str, object]:
+    return {
+        "scale_ref": 1.0,
+        "Lx": 24.0,
+        "Ly": 20.0,
+        "Lz": 0.0,
+        "x_center_dense": 12.0,
+        "y_center_dense": 10.0,
+        "z_center_dense": 0.0,
+        "Lx_dense": 8.0,
+        "Ly_dense": 6.0,
+        "Lz_dense": 0.0,
+        "Nx_dense": 64,
+        "Ny_dense": 48,
+        "Nz_dense": 0,
+        "len_left": 1.0,
+        "len_right": 1.0,
+        "len_bottom": 1.0,
+        "len_top": 1.0,
+        "len_front": 0.0,
+        "len_back": 0.0,
+        "n_left_stretch": 16,
+        "n_left_uniform": 8,
+        "n_right_uniform": 8,
+        "n_right_stretch": 16,
+        "n_bottom_stretch": 16,
+        "n_bottom_uniform": 8,
+        "n_top_uniform": 8,
+        "n_top_stretch": 16,
+        "n_front_stretch": 0,
+        "n_front_uniform": 0,
+        "n_back_uniform": 0,
+        "n_back_stretch": 0,
+        "r_left": 1.08,
+        "r_right": 1.08,
+        "r_bottom": 1.06,
+        "r_top": 1.06,
+        "r_front": 1.0,
+        "r_back": 1.0,
+        "relax": 0.001,
+        "flag_plot": False,
+        "flag_preplot": False,
+    }
 
 
 def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
