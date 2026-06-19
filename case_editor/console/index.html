@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup13">
+  <link rel="stylesheet" href="style.css?v=setup14">
 </head>
 <body>
   <main class="shell">
@@ -29,6 +29,10 @@
         <strong>Drop files here</strong>
         <span>xgrid/ygrid/zgrid.dat or unstruc_surface_in.dat</span>
       </section>
+      <section>
+        <h2>Loaded Files</h2>
+        <div id="loadedFiles" class="item-list"></div>
+      </section>
       <section id="setupPanel" class="control-panel active">
         <h2>Scene Layers</h2>
         <div class="layer-list">
@@ -50,6 +54,23 @@
           <button id="importGeometry" type="button">Import</button>
           <button id="appendGeometry" type="button">Append STL</button>
           <button id="exportStl" type="button">Export STL</button>
+        </div>
+        <h2>Bodies</h2>
+        <div id="bodyList" class="item-list"></div>
+        <div class="grid three">
+          <label>Move X<input id="moveX" type="number" step="0.01" value="0"></label>
+          <label>Move Y<input id="moveY" type="number" step="0.01" value="0"></label>
+          <label>Move Z<input id="moveZ" type="number" step="0.01" value="0"></label>
+        </div>
+        <div class="grid three">
+          <label>Rot X<input id="rotX" type="number" step="1" value="0"></label>
+          <label>Rot Y<input id="rotY" type="number" step="1" value="0"></label>
+          <label>Rot Z<input id="rotZ" type="number" step="1" value="0"></label>
+        </div>
+        <div class="actions">
+          <label class="mini-field">Scale<input id="bodyScale" type="number" min="0.0001" step="0.01" value="1"></label>
+          <button id="applyBodyTransform" type="button">Apply Body Transform</button>
+          <button id="removeBodies" type="button">Remove Body</button>
         </div>
         <p class="hint">STL import writes `unstruc_surface_in.dat`; DAT import saves the dropped surface directly.</p>
       </section>
@@ -98,6 +119,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup13"></script>
+  <script src="app.js?v=setup14"></script>
 </body>
 </html>

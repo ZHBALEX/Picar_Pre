@@ -17,13 +17,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from case_editor.case_project import CaseProject  # noqa: E402
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
-from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface  # noqa: E402
+from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup13"
+CONSOLE_API_VERSION = "setup14"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -73,7 +73,13 @@ def make_handler(default_case_dir: Path):
         def _handle_api(self, path: str, query: dict[str, list[str]]) -> None:
             try:
                 if path == "/api/health":
-                    self._send_json({"app": "Picar Console", "ok": True, "api_version": CONSOLE_API_VERSION, "origin_shift": True})
+                    self._send_json({
+                        "app": "Picar Console",
+                        "ok": True,
+                        "api_version": CONSOLE_API_VERSION,
+                        "origin_shift": True,
+                        "geometry_transform": True,
+                    })
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
                 elif path == "/api/mesh-input":
@@ -176,6 +182,27 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         output = str(payload.get("output") or "surface_export.stl")
         out, bodies = SurfaceProject(case_dir).export_stl(output=output)
         return {"ok": True, "path": str(out), "bodies": len(bodies)}
+    if path == "/api/geometry/transform":
+        body_ids = _payload_body_ids(payload)
+        translate = _payload_vec3(payload, "translate")
+        rotation = _payload_vec3(payload, "rotation")
+        scale = payload.get("scale", 1.0)
+        out, bodies = SurfaceProject(case_dir).transform(
+            body_ids=body_ids,
+            translate=translate,
+            rotation=rotation,
+            scale=float(scale),
+        )
+        return {"ok": True, "path": str(out), "bodies": _json_ready(summarize_surface(bodies)), "report": _case_report(case_dir)}
+    if path == "/api/geometry/remove-bodies":
+        body_ids = set(_payload_body_ids(payload) or [])
+        if not body_ids:
+            raise ValueError("Select at least one body to remove")
+        project = SurfaceProject(case_dir)
+        bodies = project.load(required=True)
+        kept = [body for idx, body in enumerate(bodies, start=1) if idx not in body_ids]
+        write_surface(project.surface_path, kept)
+        return {"ok": True, "path": str(project.surface_path), "bodies": _json_ready(summarize_surface(kept)), "report": _case_report(case_dir)}
     raise ValueError(f"Unknown API route: {path}")
 
 
@@ -220,6 +247,24 @@ def _shift_mesh(mesh, origin: dict[str, float]) -> None:
         mesh.y.values = mesh.y.values + origin["y"]
     if mesh.z is not None and origin["z"]:
         mesh.z.values = mesh.z.values + origin["z"]
+
+
+def _payload_body_ids(payload: dict[str, object]) -> list[int] | None:
+    raw = payload.get("body_ids")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError("body_ids must be a list")
+    return [int(item) for item in raw]
+
+
+def _payload_vec3(payload: dict[str, object], key: str):
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or len(raw) != 3:
+        raise ValueError(f"{key} must be a 3-value list")
+    return tuple(float(item) for item in raw)
 
 
 def _case_report(case_dir: Path) -> dict[str, object]:

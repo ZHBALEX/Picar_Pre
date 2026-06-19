@@ -44,10 +44,21 @@
     showDenseRegion: document.getElementById("showDenseRegion"),
     showFullMesh: document.getElementById("showFullMesh"),
     showAxes: document.getElementById("showAxes"),
+    loadedFiles: document.getElementById("loadedFiles"),
     geometryFile: document.getElementById("geometryFile"),
     importGeometry: document.getElementById("importGeometry"),
     appendGeometry: document.getElementById("appendGeometry"),
     exportStl: document.getElementById("exportStl"),
+    bodyList: document.getElementById("bodyList"),
+    moveX: document.getElementById("moveX"),
+    moveY: document.getElementById("moveY"),
+    moveZ: document.getElementById("moveZ"),
+    rotX: document.getElementById("rotX"),
+    rotY: document.getElementById("rotY"),
+    rotZ: document.getElementById("rotZ"),
+    bodyScale: document.getElementById("bodyScale"),
+    applyBodyTransform: document.getElementById("applyBodyTransform"),
+    removeBodies: document.getElementById("removeBodies"),
     meshAxes: document.getElementById("meshAxes"),
     meshInputFile: document.getElementById("meshInputFile"),
     loadMeshInput: document.getElementById("loadMeshInput"),
@@ -61,6 +72,7 @@
   const state = {
     surface: null,
     mesh: { x: null, y: null, z: null, denseBox: null },
+    loadedFiles: [],
     meshControlsReady: false,
     meshPreviewSuspended: false,
     bounds: null,
@@ -109,6 +121,8 @@
     el.importGeometry.addEventListener("click", () => importGeometry(false));
     el.appendGeometry.addEventListener("click", () => importGeometry(true));
     el.exportStl.addEventListener("click", exportStl);
+    el.applyBodyTransform.addEventListener("click", applyBodyTransform);
+    el.removeBodies.addEventListener("click", removeSelectedBodies);
     el.loadMeshInput.addEventListener("click", loadSelectedMeshInput);
     el.previewMesh.addEventListener("click", previewMeshFromControls);
     el.saveMeshInput.addEventListener("click", saveMeshInput);
@@ -133,8 +147,10 @@
 
       state.surface = null;
       state.mesh = { x: null, y: null, z: null, denseBox: null };
+      state.loadedFiles = [];
 
       if (report.surface) {
+        addLoadedFile("surface", "unstruc_surface_in.dat", "case surface");
         loads.push(fetchText(`/api/surface${loadedQuery}`).then((text) => {
           state.surface = parseSurface(text);
         }));
@@ -143,7 +159,10 @@
         state.mesh.denseBox = report.mesh.dense_box || null;
         ["x", "y", "z"].forEach((axis) => {
           loads.push(fetchText(`/api/grid${loadedQuery}&axis=${axis}`)
-            .then((text) => { state.mesh[axis] = parseGridAxis(text); })
+            .then((text) => {
+              state.mesh[axis] = parseGridAxis(text);
+              addLoadedFile(axis, `${axis}grid.dat`, "case grid");
+            })
             .catch(() => { state.mesh[axis] = null; }));
         });
       }
@@ -160,6 +179,8 @@
     } catch (err) {
       setStatus(String(err));
     }
+    renderLoadedFiles();
+    renderBodyList();
     updateCommands();
   }
 
@@ -170,20 +191,26 @@
       const lower = file.name.toLowerCase();
       if (lower.includes("unstruc_surface")) {
         state.surface = parseSurface(text);
+        addLoadedFile("surface", file.name, "dropped surface");
       } else if (lower.endsWith(".stl")) {
         setStatus("STL selected. Use Geometry > Import or Append STL.");
+        addLoadedFile(`stl:${file.name}`, file.name, "selected STL");
       } else if (isMeshInputName(lower)) {
         const params = parseMeshInputText(text);
         fillMeshControls(params);
         state.meshControlsReady = true;
         previewMeshFromControls();
         loadedMeshInput = true;
+        addLoadedFile("mesh-input", file.name, "loaded input");
       } else if (lower.startsWith("xgrid")) {
         state.mesh.x = parseGridAxis(text);
+        addLoadedFile("x", file.name, "dropped grid");
       } else if (lower.startsWith("ygrid")) {
         state.mesh.y = parseGridAxis(text);
+        addLoadedFile("y", file.name, "dropped grid");
       } else if (lower.startsWith("zgrid")) {
         state.mesh.z = parseGridAxis(text);
+        addLoadedFile("z", file.name, "dropped grid");
       }
     }
     if (!loadedMeshInput && state.mesh.x && state.mesh.y) {
@@ -194,6 +221,8 @@
     recomputeBounds();
     fit();
     updateStats();
+    renderLoadedFiles();
+    renderBodyList();
   }
 
   async function loadSelectedMeshInput() {
@@ -206,7 +235,133 @@
     fillMeshControls(params);
     state.meshControlsReady = true;
     previewMeshFromControls();
+    addLoadedFile("mesh-input", file.name, "loaded input");
+    renderLoadedFiles();
     setStatus(`Loaded mesh input: ${file.name}`);
+  }
+
+  function addLoadedFile(id, name, kind) {
+    state.loadedFiles = state.loadedFiles.filter((item) => item.id !== id);
+    state.loadedFiles.push({ id, name, kind });
+  }
+
+  function renderLoadedFiles() {
+    if (!el.loadedFiles) return;
+    if (!state.loadedFiles.length) {
+      el.loadedFiles.innerHTML = `<div class="item-row"><span class="item-meta">No files loaded</span></div>`;
+      return;
+    }
+    el.loadedFiles.innerHTML = state.loadedFiles.map((item) => `
+      <div class="item-row">
+        <div class="item-main" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}<br><span class="item-meta">${escapeHtml(item.kind)}</span></div>
+        <button type="button" data-remove-file="${escapeHtml(item.id)}">Remove</button>
+      </div>
+    `).join("");
+    el.loadedFiles.querySelectorAll("[data-remove-file]").forEach((button) => {
+      button.addEventListener("click", () => removeLoadedFile(button.dataset.removeFile));
+    });
+  }
+
+  function removeLoadedFile(id) {
+    if (id === "surface") state.surface = null;
+    if (id === "x") state.mesh.x = null;
+    if (id === "y") state.mesh.y = null;
+    if (id === "z") state.mesh.z = null;
+    if (id === "mesh-input") {
+      fillMeshControls(defaultMeshParams());
+      state.meshControlsReady = true;
+    }
+    state.loadedFiles = state.loadedFiles.filter((item) => item.id !== id);
+    if (!state.mesh.x || !state.mesh.y) state.mesh.denseBox = null;
+    recomputeBounds();
+    updateStats();
+    renderLoadedFiles();
+    renderBodyList();
+    requestDraw();
+  }
+
+  function renderBodyList() {
+    if (!el.bodyList) return;
+    if (!state.surface || !state.surface.bodies.length) {
+      el.bodyList.innerHTML = `<div class="item-row"><span class="item-meta">No surface bodies</span></div>`;
+      return;
+    }
+    el.bodyList.innerHTML = state.surface.bodies.map((body, index) => {
+      const bounds = bodyBounds(body);
+      const label = `Body ${index + 1}`;
+      const meta = `${body.nodeCount} nodes, ${body.elemCount} elems | x ${formatShort(bounds.min[0])}..${formatShort(bounds.max[0])}`;
+      return `
+        <div class="item-row">
+          <label>
+            <input type="checkbox" data-body-id="${index + 1}">
+            <span class="item-main">${label}<br><span class="item-meta">${meta}</span></span>
+          </label>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function selectedBodyIds() {
+    return Array.from(el.bodyList.querySelectorAll("[data-body-id]:checked")).map((node) => Number(node.dataset.bodyId));
+  }
+
+  function bodyBounds(body) {
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < body.nodeCount; i += 1) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = body.points[i * 3 + axis];
+        min[axis] = Math.min(min[axis], value);
+        max[axis] = Math.max(max[axis], value);
+      }
+    }
+    return { min, max };
+  }
+
+  async function applyBodyTransform() {
+    const ids = selectedBodyIds();
+    if (!ids.length) {
+      setStatus("Select at least one body first.");
+      return;
+    }
+    const payload = {
+      case_dir: el.caseDir.value.trim(),
+      body_ids: ids,
+      translate: [numValue(el.moveX), numValue(el.moveY), numValue(el.moveZ)],
+      rotation: [numValue(el.rotX), numValue(el.rotY), numValue(el.rotZ)],
+      scale: numValue(el.bodyScale, 1),
+    };
+    try {
+      await requireGeometryTransformApi();
+      await postJson("/api/geometry/transform", payload);
+      await loadCase();
+      setStatus(`Transformed body ${ids.join(", ")}.`);
+    } catch (err) {
+      setStatus(`Body transform failed: ${err.message || err}`);
+    }
+  }
+
+  async function removeSelectedBodies() {
+    const ids = selectedBodyIds();
+    if (!ids.length) {
+      setStatus("Select at least one body first.");
+      return;
+    }
+    try {
+      await requireGeometryTransformApi();
+      await postJson("/api/geometry/remove-bodies", { case_dir: el.caseDir.value.trim(), body_ids: ids });
+      await loadCase();
+      setStatus(`Removed body ${ids.join(", ")}.`);
+    } catch (err) {
+      setStatus(`Remove body failed: ${err.message || err}`);
+    }
+  }
+
+  async function requireGeometryTransformApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.geometry_transform) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before editing bodies.");
+    }
   }
 
   function isMeshInputName(name) {
@@ -700,6 +855,8 @@
       return;
     }
     await loadCase();
+    renderLoadedFiles();
+    renderBodyList();
     setStatus(append ? "Geometry appended." : "Geometry imported.");
   }
 
@@ -1140,6 +1297,22 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return "0";
     return Number(number.toPrecision(10)).toString();
+  }
+
+  function formatShort(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "0";
+    return Number(number.toPrecision(5)).toString();
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[ch]));
   }
 
   function fit() {
