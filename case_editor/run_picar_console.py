@@ -23,6 +23,7 @@ from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mes
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
+CONSOLE_API_VERSION = "setup13"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -72,7 +73,7 @@ def make_handler(default_case_dir: Path):
         def _handle_api(self, path: str, query: dict[str, list[str]]) -> None:
             try:
                 if path == "/api/health":
-                    self._send_json({"app": "Picar Console", "ok": True})
+                    self._send_json({"app": "Picar Console", "ok": True, "api_version": CONSOLE_API_VERSION, "origin_shift": True})
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
                 elif path == "/api/mesh-input":
@@ -142,6 +143,7 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
     if path == "/api/mesh/preview":
         params = _payload_mesh_params(payload)
         mesh = generate_mesh(params, repair_degenerate=True)
+        _shift_mesh(mesh, _payload_mesh_origin(payload))
         return {"ok": True, "mesh": _mesh_payload(mesh), "input_text": format_mesh_input(params)}
     if path == "/api/mesh/save":
         params = _payload_mesh_params(payload)
@@ -151,6 +153,7 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         params = _payload_mesh_params(payload)
         out = write_mesh_input(case_dir / str(payload.get("input_name") or DEFAULT_MESH_INPUT_NAME), params)
         mesh = generate_mesh(params)
+        _shift_mesh(mesh, _payload_mesh_origin(payload))
         write_mesh(case_dir, mesh, include_index=True)
         return {"ok": True, "input_path": str(out), "mesh": _mesh_payload(mesh), "report": _case_report(case_dir)}
     if path == "/api/geometry/save-surface":
@@ -197,6 +200,26 @@ def _payload_mesh_params(payload: dict[str, object]) -> dict[str, object]:
     if not isinstance(params, dict):
         raise ValueError("Missing mesh params")
     return params
+
+
+def _payload_mesh_origin(payload: dict[str, object]) -> dict[str, float]:
+    origin = payload.get("origin")
+    if not isinstance(origin, dict):
+        return {"x": 0.0, "y": 0.0, "z": 0.0}
+    return {
+        "x": float(origin.get("x") or 0.0),
+        "y": float(origin.get("y") or 0.0),
+        "z": float(origin.get("z") or 0.0),
+    }
+
+
+def _shift_mesh(mesh, origin: dict[str, float]) -> None:
+    if origin["x"]:
+        mesh.x.values = mesh.x.values + origin["x"]
+    if origin["y"]:
+        mesh.y.values = mesh.y.values + origin["y"]
+    if mesh.z is not None and origin["z"]:
+        mesh.z.values = mesh.z.values + origin["z"]
 
 
 def _case_report(case_dir: Path) -> dict[str, object]:
@@ -285,10 +308,16 @@ def _params_from_existing_mesh(mesh) -> dict[str, object]:
             "Ny_dense": y_axis["dense_count"],
             "Nz_dense": z_axis["dense_count"] if z_axis is not None else 0,
             "n_left_stretch": x_axis["left_stretch"],
+            "n_left_uniform": 0,
+            "n_right_uniform": 0,
             "n_right_stretch": x_axis["right_stretch"],
             "n_bottom_stretch": y_axis["left_stretch"],
+            "n_bottom_uniform": 0,
+            "n_top_uniform": 0,
             "n_top_stretch": y_axis["right_stretch"],
             "n_front_stretch": z_axis["left_stretch"] if z_axis is not None else 0,
+            "n_front_uniform": 0,
+            "n_back_uniform": 0,
             "n_back_stretch": z_axis["right_stretch"] if z_axis is not None else 0,
             "len_left": 0.0,
             "len_right": 0.0,
@@ -395,9 +424,11 @@ def _default_mesh_params() -> dict[str, object]:
 
 
 def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
+    mesh = None
     if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
         try:
-            params = _params_from_existing_mesh(read_mesh(case_dir, require_z=False))
+            mesh = read_mesh(case_dir, require_z=False)
+            params = _params_from_existing_mesh(mesh)
         except Exception:
             params = None
     else:
@@ -413,13 +444,16 @@ def _mesh_dense_box(case_dir: Path) -> dict[str, float] | None:
                 continue
     if params is None:
         return None
-    x0 = float(params["x_center_dense"]) - 0.5 * float(params["Lx_dense"])
-    x1 = float(params["x_center_dense"]) + 0.5 * float(params["Lx_dense"])
-    y0 = float(params["y_center_dense"]) - 0.5 * float(params["Ly_dense"])
-    y1 = float(params["y_center_dense"]) + 0.5 * float(params["Ly_dense"])
+    x_start = float(mesh.x.values[0]) if mesh is not None else 0.0
+    y_start = float(mesh.y.values[0]) if mesh is not None else 0.0
+    z_start = float(mesh.z.values[0]) if mesh is not None and mesh.z is not None and mesh.z.count > 1 else 0.0
+    x0 = x_start + float(params["x_center_dense"]) - 0.5 * float(params["Lx_dense"])
+    x1 = x_start + float(params["x_center_dense"]) + 0.5 * float(params["Lx_dense"])
+    y0 = y_start + float(params["y_center_dense"]) - 0.5 * float(params["Ly_dense"])
+    y1 = y_start + float(params["y_center_dense"]) + 0.5 * float(params["Ly_dense"])
     if "z_center_dense" in params and float(params.get("Lz_dense", 0.0)) > 0.0:
-        z0 = float(params["z_center_dense"]) - 0.5 * float(params["Lz_dense"])
-        z1 = float(params["z_center_dense"]) + 0.5 * float(params["Lz_dense"])
+        z0 = z_start + float(params["z_center_dense"]) - 0.5 * float(params["Lz_dense"])
+        z1 = z_start + float(params["z_center_dense"]) + 0.5 * float(params["Lz_dense"])
     else:
         z0 = 0.0
         z1 = 0.0

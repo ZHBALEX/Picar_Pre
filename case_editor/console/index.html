@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup9">
+  <link rel="stylesheet" href="style.css?v=setup13">
 </head>
 <body>
   <main class="shell">
@@ -60,7 +60,12 @@
           <label>Relax<input id="relax" type="number" step="0.0001"></label>
         </div>
         <div id="meshAxes"></div>
+        <label class="field">
+          <span>Mesh input</span>
+          <input id="meshInputFile" type="file" accept=".dat,.txt">
+        </label>
         <div class="actions">
+          <button id="loadMeshInput" type="button">Load Input</button>
           <button id="previewMesh" type="button">Preview</button>
           <button id="saveMeshInput" type="button">Save Input</button>
           <button id="generateMesh" type="button">Generate XYZ</button>
@@ -93,6 +98,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup9"></script>
+  <script src="app.js?v=setup13"></script>
 </body>
 </html>

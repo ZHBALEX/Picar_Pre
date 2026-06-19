@@ -3,6 +3,28 @@
   const MAX_SURFACE_TRIANGLES = 9000;
   const MAX_GRID_LINES = 28;
   const DENSE_UNIFORM_RATIO = 1.05;
+  const MESH_INPUT_FIELDS = [
+    ["scale_ref", "float"], ["Lx", "float"], ["Ly", "float"], ["Lz", "float"],
+    ["x_center_dense", "float"], ["y_center_dense", "float"], ["z_center_dense", "float"],
+    ["Lx_dense", "float"], ["Ly_dense", "float"], ["Lz_dense", "float"],
+    ["Nx_dense", "int"], ["Ny_dense", "int"], ["Nz_dense", "int"],
+    ["len_left", "float"], ["len_right", "float"], ["len_bottom", "float"], ["len_top", "float"], ["len_front", "float"], ["len_back", "float"],
+    ["n_left_stretch", "int"], ["n_left_uniform", "int"], ["n_right_uniform", "int"], ["n_right_stretch", "int"],
+    ["n_bottom_stretch", "int"], ["n_bottom_uniform", "int"], ["n_top_uniform", "int"], ["n_top_stretch", "int"],
+    ["n_front_stretch", "int"], ["n_front_uniform", "int"], ["n_back_uniform", "int"], ["n_back_stretch", "int"],
+    ["r_left", "float"], ["r_right", "float"], ["r_bottom", "float"], ["r_top", "float"], ["r_front", "float"], ["r_back", "float"],
+    ["relax", "float"], ["flag_plot", "bool"], ["flag_preplot", "bool"],
+  ];
+  const TWOLAYER_2D_INPUT_FIELDS = [
+    ["scale_ref", "float"], ["Lx", "float"], ["Ly", "float"],
+    ["x_center_dense", "float"], ["y_center_dense", "float"], ["Lx_dense", "float"], ["Ly_dense", "float"],
+    ["Nx_dense", "int"], ["Ny_dense", "int"],
+    ["len_left", "float"], ["len_right", "float"], ["len_bottom", "float"], ["len_top", "float"],
+    ["n_left_stretch", "int"], ["n_left_uniform", "int"], ["n_right_uniform", "int"], ["n_right_stretch", "int"],
+    ["n_bottom_stretch", "int"], ["n_bottom_uniform", "int"], ["n_top_uniform", "int"], ["n_top_stretch", "int"],
+    ["r_left", "float"], ["r_right", "float"], ["r_bottom", "float"], ["r_top", "float"],
+    ["relax", "float"], ["flag_plot", "bool"], ["flag_preplot", "bool"],
+  ];
 
   const el = {
     caseDir: document.getElementById("caseDir"),
@@ -27,6 +49,8 @@
     appendGeometry: document.getElementById("appendGeometry"),
     exportStl: document.getElementById("exportStl"),
     meshAxes: document.getElementById("meshAxes"),
+    meshInputFile: document.getElementById("meshInputFile"),
+    loadMeshInput: document.getElementById("loadMeshInput"),
     scaleRef: document.getElementById("scaleRef"),
     relax: document.getElementById("relax"),
     previewMesh: document.getElementById("previewMesh"),
@@ -85,6 +109,7 @@
     el.importGeometry.addEventListener("click", () => importGeometry(false));
     el.appendGeometry.addEventListener("click", () => importGeometry(true));
     el.exportStl.addEventListener("click", exportStl);
+    el.loadMeshInput.addEventListener("click", loadSelectedMeshInput);
     el.previewMesh.addEventListener("click", previewMeshFromControls);
     el.saveMeshInput.addEventListener("click", saveMeshInput);
     el.generateMesh.addEventListener("click", generateMesh);
@@ -124,10 +149,14 @@
       }
 
       await Promise.all(loads);
-      await loadMeshInputControls();
+      await loadMeshInputControls({ preview: !report.mesh });
       recomputeBounds();
       fit();
-      setStatus(formatReport(report));
+      if (report.mesh || !state.mesh.x || !state.mesh.y) {
+        setStatus(formatReport(report));
+      } else {
+        updateStats();
+      }
     } catch (err) {
       setStatus(String(err));
     }
@@ -135,6 +164,7 @@
   }
 
   async function readFiles(files) {
+    let loadedMeshInput = false;
     for (const file of Array.from(files)) {
       const text = await file.text();
       const lower = file.name.toLowerCase();
@@ -142,6 +172,12 @@
         state.surface = parseSurface(text);
       } else if (lower.endsWith(".stl")) {
         setStatus("STL selected. Use Geometry > Import or Append STL.");
+      } else if (isMeshInputName(lower)) {
+        const params = parseMeshInputText(text);
+        fillMeshControls(params);
+        state.meshControlsReady = true;
+        previewMeshFromControls();
+        loadedMeshInput = true;
       } else if (lower.startsWith("xgrid")) {
         state.mesh.x = parseGridAxis(text);
       } else if (lower.startsWith("ygrid")) {
@@ -150,21 +186,157 @@
         state.mesh.z = parseGridAxis(text);
       }
     }
+    if (!loadedMeshInput && state.mesh.x && state.mesh.y) {
+      state.mesh.denseBox = inferDenseBox();
+      fillMeshControls(paramsFromCurrentGrid());
+      state.meshControlsReady = true;
+    }
     recomputeBounds();
     fit();
     updateStats();
   }
 
-  async function loadMeshInputControls() {
+  async function loadSelectedMeshInput() {
+    const file = el.meshInputFile.files && el.meshInputFile.files[0];
+    if (!file) {
+      setStatus("Choose a mesh_input_twolayers.dat file first.");
+      return;
+    }
+    const params = parseMeshInputText(await file.text());
+    fillMeshControls(params);
+    state.meshControlsReady = true;
+    previewMeshFromControls();
+    setStatus(`Loaded mesh input: ${file.name}`);
+  }
+
+  function isMeshInputName(name) {
+    return name === "input.dat" || name.includes("mesh_input") || name.includes("input_mesh");
+  }
+
+  function parseMeshInputText(text) {
+    const values = [];
+    text.split(/\r?\n/).forEach((rawLine) => {
+      const line = rawLine.split("!", 1)[0].trim();
+      if (!line) return;
+      const token = line.split(/\s+/)[0];
+      values.push(parseScalar(token));
+    });
+    const fields = values.length >= MESH_INPUT_FIELDS.length ? MESH_INPUT_FIELDS : TWOLAYER_2D_INPUT_FIELDS;
+    if (values.length < fields.length) {
+      throw new Error(`Mesh input has ${values.length} values; expected at least ${fields.length}.`);
+    }
+    const params = defaultMeshParams();
+    fields.forEach(([key, kind], index) => {
+      const value = values[index];
+      if (kind === "int") params[key] = Math.trunc(Number(value));
+      else if (kind === "bool") params[key] = Boolean(value);
+      else params[key] = Number(value);
+    });
+    if (fields === TWOLAYER_2D_INPUT_FIELDS) {
+      params.Lz = 0;
+      params.z_center_dense = 0;
+      params.Lz_dense = 0;
+      params.Nz_dense = 0;
+      params.len_front = 0;
+      params.len_back = 0;
+      params.n_front_stretch = 0;
+      params.n_front_uniform = 0;
+      params.n_back_uniform = 0;
+      params.n_back_stretch = 0;
+      params.r_front = 1;
+      params.r_back = 1;
+    }
+    return params;
+  }
+
+  function parseScalar(token) {
+    const lowered = String(token).trim().toLowerCase();
+    if (["true", "t", ".true."].includes(lowered)) return true;
+    if (["false", "f", ".false."].includes(lowered)) return false;
+    const value = Number(lowered.replace(/[dD]/, "e"));
+    if (!Number.isFinite(value)) throw new Error(`Invalid mesh input value: ${token}`);
+    return value;
+  }
+
+  function paramsFromCurrentGrid() {
+    const x = axisParamsFromValues(state.mesh.x);
+    const y = axisParamsFromValues(state.mesh.y);
+    const z = state.mesh.z && state.mesh.z.length > 1 ? axisParamsFromValues(state.mesh.z) : null;
+    const p = defaultMeshParams();
+    return {
+      ...p,
+      Lx: x.length,
+      Ly: y.length,
+      Lz: z ? z.length : 0,
+      x_center_dense: x.center,
+      y_center_dense: y.center,
+      z_center_dense: z ? z.center : 0,
+      Lx_dense: x.denseLength,
+      Ly_dense: y.denseLength,
+      Lz_dense: z ? z.denseLength : 0,
+      Nx_dense: x.denseCount,
+      Ny_dense: y.denseCount,
+      Nz_dense: z ? z.denseCount : 0,
+      n_left_stretch: x.leftStretch,
+      n_left_uniform: 0,
+      n_right_uniform: 0,
+      n_right_stretch: x.rightStretch,
+      n_bottom_stretch: y.leftStretch,
+      n_bottom_uniform: 0,
+      n_top_uniform: 0,
+      n_top_stretch: y.rightStretch,
+      n_front_stretch: z ? z.leftStretch : 0,
+      n_front_uniform: 0,
+      n_back_uniform: 0,
+      n_back_stretch: z ? z.rightStretch : 0,
+      len_left: 0,
+      len_right: 0,
+      len_bottom: 0,
+      len_top: 0,
+      len_front: 0,
+      len_back: 0,
+    };
+  }
+
+  function axisParamsFromValues(values) {
+    const start = values[0];
+    const end = values[values.length - 1];
+    const length = end - start;
+    const range = inferDenseRange(values) || [start, end];
+    const spacing = [];
+    for (let i = 0; i < values.length - 1; i += 1) spacing.push(values[i + 1] - values[i]);
+    let denseCount = 0;
+    let leftStretch = 0;
+    let rightStretch = 0;
+    for (let i = 0; i < spacing.length; i += 1) {
+      const a = values[i];
+      const b = values[i + 1];
+      if (a >= range[0] - 1e-10 && b <= range[1] + 1e-10) denseCount += 1;
+      else if (b <= range[0] + 1e-10) leftStretch += 1;
+      else if (a >= range[1] - 1e-10) rightStretch += 1;
+    }
+    return {
+      length,
+      center: 0.5 * (range[0] + range[1]) - start,
+      denseLength: Math.max(0, range[1] - range[0]),
+      denseCount,
+      leftStretch,
+      rightStretch,
+    };
+  }
+
+  async function loadMeshInputControls(options = {}) {
+    const preview = options.preview === true;
     try {
       const query = `?case_dir=${encodeURIComponent(el.caseDir.value.trim())}`;
       const payload = await fetchJson(`/api/mesh-input${query}`);
       fillMeshControls(payload.params);
       state.meshControlsReady = true;
-      previewMeshFromControls();
+      if (preview) previewMeshFromControls();
     } catch (err) {
       state.meshControlsReady = true;
       fillMeshControls(defaultMeshParams());
+      if (preview) previewMeshFromControls();
       setStatus(`Mesh input controls not loaded: ${err}`);
     }
   }
@@ -216,13 +388,17 @@
   function fillMeshControls(params) {
     state.meshPreviewSuspended = true;
     const p = params || {};
+    const start = previewStarts();
+    const xStart = start.x;
+    const yStart = start.y;
+    const zStart = start.z;
     el.scaleRef.value = p.scale_ref ?? 1;
     el.relax.value = p.relax ?? 0.001;
     fillAxis("x", {
-      start: 0,
-      denseStart: (p.x_center_dense ?? 12) - 0.5 * (p.Lx_dense ?? 8),
-      denseEnd: (p.x_center_dense ?? 12) + 0.5 * (p.Lx_dense ?? 8),
-      end: p.Lx ?? 24,
+      start: xStart,
+      denseStart: xStart + (p.x_center_dense ?? 12) - 0.5 * (p.Lx_dense ?? 8),
+      denseEnd: xStart + (p.x_center_dense ?? 12) + 0.5 * (p.Lx_dense ?? 8),
+      end: xStart + (p.Lx ?? 24),
       leftStretch: p.n_left_stretch ?? 16,
       leftUniform: p.n_left_uniform ?? 8,
       denseCount: p.Nx_dense ?? 64,
@@ -233,10 +409,10 @@
       ratio: p.r_left ?? p.r_right ?? 1.08,
     });
     fillAxis("y", {
-      start: 0,
-      denseStart: (p.y_center_dense ?? 10) - 0.5 * (p.Ly_dense ?? 6),
-      denseEnd: (p.y_center_dense ?? 10) + 0.5 * (p.Ly_dense ?? 6),
-      end: p.Ly ?? 20,
+      start: yStart,
+      denseStart: yStart + (p.y_center_dense ?? 10) - 0.5 * (p.Ly_dense ?? 6),
+      denseEnd: yStart + (p.y_center_dense ?? 10) + 0.5 * (p.Ly_dense ?? 6),
+      end: yStart + (p.Ly ?? 20),
       leftStretch: p.n_bottom_stretch ?? 16,
       leftUniform: p.n_bottom_uniform ?? 8,
       denseCount: p.Ny_dense ?? 48,
@@ -247,10 +423,10 @@
       ratio: p.r_bottom ?? p.r_top ?? 1.06,
     });
     fillAxis("z", {
-      start: 0,
-      denseStart: (p.z_center_dense ?? 0) - 0.5 * (p.Lz_dense ?? 0),
-      denseEnd: (p.z_center_dense ?? 0) + 0.5 * (p.Lz_dense ?? 0),
-      end: p.Lz ?? 0,
+      start: zStart,
+      denseStart: zStart + (p.z_center_dense ?? 0) - 0.5 * (p.Lz_dense ?? 0),
+      denseEnd: zStart + (p.z_center_dense ?? 0) + 0.5 * (p.Lz_dense ?? 0),
+      end: zStart + (p.Lz ?? 0),
       leftStretch: p.n_front_stretch ?? 0,
       leftUniform: p.n_front_uniform ?? 0,
       denseCount: p.Nz_dense ?? 0,
@@ -358,14 +534,17 @@
       const params = readMeshParams();
       state.mesh.x = makeAxisNodesFromControls("x");
       state.mesh.y = makeAxisNodesFromControls("y");
-      state.mesh.z = params.Lz > 0 && params.Nz_dense > 0 ? makeAxisNodesFromControls("z") : null;
+      state.mesh.z = params.Lz > 0 && axisIntervalCount("z") > 0 ? makeAxisNodesFromControls("z") : null;
+      const x = readAxisControls("x");
+      const y = readAxisControls("y");
+      const z = readAxisControls("z");
       state.mesh.denseBox = {
-        x0: params.x_center_dense - 0.5 * params.Lx_dense,
-        x1: params.x_center_dense + 0.5 * params.Lx_dense,
-        y0: params.y_center_dense - 0.5 * params.Ly_dense,
-        y1: params.y_center_dense + 0.5 * params.Ly_dense,
-        z0: params.z_center_dense - 0.5 * params.Lz_dense,
-        z1: params.z_center_dense + 0.5 * params.Lz_dense,
+        x0: x.denseStart,
+        x1: x.denseEnd,
+        y0: y.denseStart,
+        y1: y.denseEnd,
+        z0: z.denseStart,
+        z1: z.denseEnd,
       };
       recomputeBounds();
       updateStats();
@@ -460,21 +639,42 @@
   }
 
   async function saveMeshInput() {
-    await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
-    setStatus("Mesh input saved.");
-    await loadCase();
+    const result = await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+    previewMeshFromControls();
+    setStatus(`Mesh input saved: ${result.path || "mesh_input_twolayers.dat"}`);
+  }
+
+  function readMeshOrigin() {
+    return {
+      x: numId("xStart"),
+      y: numId("yStart"),
+      z: numId("zStart"),
+    };
+  }
+
+  function axisIntervalCount(axis) {
+    const cfg = readAxisControls(axis);
+    return cfg.leftStretch + cfg.leftUniform + cfg.denseCount + cfg.rightUniform + cfg.rightStretch;
   }
 
   async function generateMesh() {
-    const result = await postJson("/api/mesh/generate", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
-    if (result.mesh) {
-      state.mesh.x = Float64Array.from(result.mesh.x);
-      state.mesh.y = Float64Array.from(result.mesh.y);
-      state.mesh.z = result.mesh.z.length ? Float64Array.from(result.mesh.z) : null;
+    try {
+      const health = await fetchJson("/api/health");
+      if (!health.origin_shift) {
+        throw new Error("Backend is still running an old mesh generator API. Stop the console server and restart `python -B picar_console.py` before Generate XYZ.");
+      }
+      const result = await postJson("/api/mesh/generate", { case_dir: el.caseDir.value.trim(), params: readMeshParams(), origin: readMeshOrigin() });
+      if (result.mesh) {
+        state.mesh.x = Float64Array.from(result.mesh.x);
+        state.mesh.y = Float64Array.from(result.mesh.y);
+        state.mesh.z = result.mesh.z.length ? Float64Array.from(result.mesh.z) : null;
+      }
+      recomputeBounds();
+      requestDraw();
+      setStatus("xgrid/ygrid/zgrid generated.");
+    } catch (err) {
+      setStatus(`Generate XYZ failed: ${err.message || err}`);
     }
-    recomputeBounds();
-    requestDraw();
-    setStatus("xgrid/ygrid/zgrid generated.");
   }
 
   async function importGeometry(append) {
@@ -555,6 +755,35 @@
       if (parts.length >= 2) values.push(Number(parts[1]));
     });
     return Float64Array.from(values.filter(Number.isFinite));
+  }
+
+  function previewStarts() {
+    const surface = surfaceBounds();
+    return {
+      x: state.mesh.x && state.mesh.x.length ? state.mesh.x[0] : (surface ? surface.min[0] : 0),
+      y: state.mesh.y && state.mesh.y.length ? state.mesh.y[0] : (surface ? surface.min[1] : 0),
+      z: state.mesh.z && state.mesh.z.length ? state.mesh.z[0] : (surface ? surface.min[2] : 0),
+    };
+  }
+
+  function surfaceBounds() {
+    if (!state.surface || !state.surface.bodies.length) return null;
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    state.surface.bodies.forEach((body) => {
+      for (let i = 0; i < body.nodeCount; i += 1) {
+        const x = body.points[i * 3];
+        const y = body.points[i * 3 + 1];
+        const z = body.points[i * 3 + 2];
+        min[0] = Math.min(min[0], x);
+        min[1] = Math.min(min[1], y);
+        min[2] = Math.min(min[2], z);
+        max[0] = Math.max(max[0], x);
+        max[1] = Math.max(max[1], y);
+        max[2] = Math.max(max[2], z);
+      }
+    });
+    return Number.isFinite(min[0]) ? { min, max } : null;
   }
 
   function numericTokens(text) {
