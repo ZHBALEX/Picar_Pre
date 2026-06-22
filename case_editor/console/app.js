@@ -1,6 +1,7 @@
 (function () {
   const MAX_SURFACE_POINTS = 35000;
-  const MAX_SURFACE_TRIANGLES = 9000;
+  const MAX_SURFACE_TRIANGLES = 80000;
+  const INTERACTIVE_SURFACE_TRIANGLES = 12000;
   const MAX_GRID_LINES = 28;
   const DENSE_UNIFORM_RATIO = 1.05;
   const MESH_INPUT_FIELDS = [
@@ -82,6 +83,7 @@
     panX: 0,
     panY: 0,
     dragging: false,
+    interactingUntil: 0,
     lastX: 0,
     lastY: 0,
     framePending: false,
@@ -116,7 +118,12 @@
     ].forEach((node) => node.addEventListener("change", requestDraw));
     el.viewport.addEventListener("mousedown", startDrag);
     window.addEventListener("mousemove", drag);
-    window.addEventListener("mouseup", () => { state.dragging = false; });
+    window.addEventListener("mouseup", () => {
+      if (state.dragging) {
+        state.dragging = false;
+        requestDraw();
+      }
+    });
     el.viewport.addEventListener("wheel", zoom, { passive: false });
     el.importGeometry.addEventListener("click", () => importGeometry(false));
     el.appendGeometry.addEventListener("click", () => importGeometry(true));
@@ -885,8 +892,10 @@
       const elemCount = Math.trunc(values[i + 1]);
       i += 2;
       const points = new Float64Array(nodeCount * 3);
+      const nodeMap = new Map();
       for (let n = 0; n < nodeCount; n += 1) {
-        i += 1;
+        const nodeId = Math.trunc(values[i++]);
+        nodeMap.set(nodeId, n);
         points[n * 3] = values[i++];
         points[n * 3 + 1] = values[i++];
         points[n * 3 + 2] = values[i++];
@@ -894,9 +903,9 @@
       const elems = new Int32Array(elemCount * 3);
       for (let e = 0; e < elemCount; e += 1) {
         i += 1;
-        elems[e * 3] = Math.trunc(values[i++]) - 1;
-        elems[e * 3 + 1] = Math.trunc(values[i++]) - 1;
-        elems[e * 3 + 2] = Math.trunc(values[i++]) - 1;
+        elems[e * 3] = nodeMap.get(Math.trunc(values[i++])) ?? -1;
+        elems[e * 3 + 1] = nodeMap.get(Math.trunc(values[i++])) ?? -1;
+        elems[e * 3 + 2] = nodeMap.get(Math.trunc(values[i++])) ?? -1;
       }
       if (i + 2 < values.length && !isSentinel(values, i)) i += 3;
       bodies.push({ points, elems, nodeCount, elemCount });
@@ -989,13 +998,11 @@
     surface.bodies.forEach((body, bodyIndex) => {
       const color = bodyIndex % 2 ? "#7a5a2f" : "#0e5f95";
       const pointStride = Math.max(1, Math.ceil(body.nodeCount / MAX_SURFACE_POINTS));
-      const triStride = Math.max(1, Math.ceil(body.elemCount / MAX_SURFACE_TRIANGLES));
+      const isInteractive = state.dragging || performance.now() < state.interactingUntil;
+      const triangleBudget = isInteractive ? INTERACTIVE_SURFACE_TRIANGLES : MAX_SURFACE_TRIANGLES;
+      const triStride = body.elemCount <= triangleBudget ? 1 : Math.ceil(body.elemCount / triangleBudget);
       if (el.showSurfaceLines.checked && body.elemCount) {
-        ctx.strokeStyle = "rgba(20, 54, 82, 0.38)";
-        ctx.lineWidth = 0.55;
-        for (let e = 0; e < body.elemCount; e += triStride) {
-          pathTriangle(ctx, rect, body, e);
-        }
+        drawSurfaceTriangleWire(ctx, rect, body, triStride);
       }
       if (el.showSurfacePoints.checked) {
         ctx.fillStyle = color;
@@ -1079,19 +1086,35 @@
     });
   }
 
-  function pathTriangle(ctx, rect, body, elemIndex) {
+  function drawSurfaceTriangleWire(ctx, rect, body, triStride) {
+    ctx.beginPath();
+    for (let e = 0; e < body.elemCount; e += triStride) {
+      const triangle = projectedTriangle(rect, body, e);
+      if (!triangle) continue;
+      const { pa, pb, pc } = triangle;
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.lineTo(pc.x, pc.y);
+      ctx.closePath();
+    }
+    ctx.strokeStyle = "rgba(20, 54, 82, 0.24)";
+    ctx.lineWidth = (state.dragging || performance.now() < state.interactingUntil) ? 0.28 : 0.32;
+    ctx.stroke();
+  }
+
+  function projectedTriangle(rect, body, elemIndex) {
     const a = body.elems[elemIndex * 3];
     const b = body.elems[elemIndex * 3 + 1];
     const c = body.elems[elemIndex * 3 + 2];
+    if (!validBodyPointIndex(body, a) || !validBodyPointIndex(body, b) || !validBodyPointIndex(body, c)) return null;
     const pa = projectBodyPoint(rect, body, a);
     const pb = projectBodyPoint(rect, body, b);
     const pc = projectBodyPoint(rect, body, c);
-    ctx.beginPath();
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-    ctx.lineTo(pc.x, pc.y);
-    ctx.closePath();
-    ctx.stroke();
+    return { pa, pb, pc, depth: (pa.depth + pb.depth + pc.depth) / 3 };
+  }
+
+  function validBodyPointIndex(body, index) {
+    return Number.isInteger(index) && index >= 0 && index < body.nodeCount;
   }
 
   function projectBodyPoint(rect, body, index) {
@@ -1156,10 +1179,12 @@
     const rx = px * cosy + pz * siny;
     const rz = -px * siny + pz * cosy;
     const ry = py * cosx - rz * sinx;
+    const depth = py * sinx + rz * cosx;
     const scale = 0.78 * Math.min(rect.width, rect.height) / Math.max(b.span, 1e-12) * state.zoom;
     return {
       x: rect.width / 2 + state.panX + rx * scale,
       y: rect.height / 2 + state.panY - ry * scale,
+      depth,
     };
   }
 
@@ -1355,7 +1380,10 @@
     event.preventDefault();
     state.zoom *= event.deltaY < 0 ? 1.12 : 0.89;
     state.zoom = Math.max(0.05, Math.min(80, state.zoom));
+    state.interactingUntil = performance.now() + 180;
     requestDraw();
+    window.clearTimeout(state.zoomSettleTimer);
+    state.zoomSettleTimer = window.setTimeout(requestDraw, 200);
   }
 
   function updateStats() {
