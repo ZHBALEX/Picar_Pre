@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup18">
+  <link rel="stylesheet" href="style.css?v=setup21">
 </head>
 <body>
   <main class="shell">
@@ -110,7 +110,10 @@
         </div>
         <div class="toolbar-actions">
           <button id="topView" type="button">Top</button>
-          <button id="isoView" type="button">ISO</button>
+          <button id="isoView" class="active" type="button">ISO</button>
+          <button id="xyView" type="button">XY</button>
+          <button id="xzView" type="button">XZ</button>
+          <button id="yzView" type="button">YZ</button>
         </div>
       </header>
       <canvas id="viewport"></canvas>
@@ -119,6 +122,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup18"></script>
+  <script src="app.js?v=setup21"></script>
 </body>
 </html>

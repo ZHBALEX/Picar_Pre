@@ -33,6 +33,9 @@
     fitView: document.getElementById("fitView"),
     topView: document.getElementById("topView"),
     isoView: document.getElementById("isoView"),
+    xyView: document.getElementById("xyView"),
+    xzView: document.getElementById("xzView"),
+    yzView: document.getElementById("yzView"),
     dropzone: document.getElementById("dropzone"),
     fileInput: document.getElementById("fileInput"),
     viewport: document.getElementById("viewport"),
@@ -77,8 +80,9 @@
     meshControlsReady: false,
     meshPreviewSuspended: false,
     bounds: null,
-    angleX: -0.55,
-    angleY: 0.72,
+    angleX: 0.62,
+    angleY: -0.78,
+    viewMode: "iso",
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -104,6 +108,9 @@
     el.fitView.addEventListener("click", fit);
     el.topView.addEventListener("click", topView);
     el.isoView.addEventListener("click", isoView);
+    el.xyView.addEventListener("click", () => planeView("xy"));
+    el.xzView.addEventListener("click", () => planeView("xz"));
+    el.yzView.addEventListener("click", () => planeView("yz"));
     el.fileInput.addEventListener("change", () => readFiles(el.fileInput.files));
     ["dragenter", "dragover"].forEach((name) => el.dropzone.addEventListener(name, onDrag));
     ["dragleave", "drop"].forEach((name) => el.dropzone.addEventListener(name, offDrag));
@@ -1048,6 +1055,10 @@
   }
 
   function drawAxesAndTicks(ctx, rect) {
+    if (isPlaneView()) {
+      drawPlaneAxesAndTicks(ctx, rect);
+      return;
+    }
     const b = state.bounds;
     const box = { x0: b.min[0], x1: b.max[0], y0: b.min[1], y1: b.max[1], z0: b.min[2], z1: b.max[2] };
     drawBoxEdges(ctx, rect, box, "rgba(120, 130, 140, 0.26)", 0.8);
@@ -1055,6 +1066,65 @@
     drawAxis(ctx, rect, [box.x0, box.y0, box.z0], [box.x1, box.y0, box.z0], "X Axis", ticks(box.x0, box.x1), 0);
     drawAxis(ctx, rect, [box.x0, box.y0, box.z0], [box.x0, box.y1, box.z0], "Y Axis", ticks(box.y0, box.y1), 1);
     drawAxis(ctx, rect, [box.x0, box.y0, box.z0], [box.x0, box.y0, box.z1], "Z Axis", ticks(box.z0, box.z1), 2);
+  }
+
+  function drawPlaneAxesAndTicks(ctx, rect) {
+    const b = state.bounds;
+    const axes = planeAxes(state.viewMode);
+    const uTicks = ticks(b.min[axes.u], b.max[axes.u]);
+    const vTicks = ticks(b.min[axes.v], b.max[axes.v]);
+    const d0 = b.min[axes.d];
+    const corner = (u, v) => planePoint(axes, u, v, d0);
+    const u0 = b.min[axes.u];
+    const u1 = b.max[axes.u];
+    const v0 = b.min[axes.v];
+    const v1 = b.max[axes.v];
+
+    ctx.strokeStyle = "rgba(160, 166, 172, 0.22)";
+    ctx.lineWidth = 0.7;
+    uTicks.forEach((u) => linePoints(ctx, rect, corner(u, v0), corner(u, v1)));
+    vTicks.forEach((v) => linePoints(ctx, rect, corner(u0, v), corner(u1, v)));
+
+    ctx.strokeStyle = "rgba(120, 130, 140, 0.42)";
+    ctx.lineWidth = 1;
+    linePoints(ctx, rect, corner(u0, v0), corner(u1, v0));
+    linePoints(ctx, rect, corner(u1, v0), corner(u1, v1));
+    linePoints(ctx, rect, corner(u1, v1), corner(u0, v1));
+    linePoints(ctx, rect, corner(u0, v1), corner(u0, v0));
+
+    drawPlaneAxis(ctx, rect, axes, u0, v0, u1, v0, `${axisName(axes.u)} Axis`, uTicks, axes.u);
+    drawPlaneAxis(ctx, rect, axes, u0, v0, u0, v1, `${axisName(axes.v)} Axis`, vTicks, axes.v);
+  }
+
+  function drawPlaneAxis(ctx, rect, axes, uStart, vStart, uEnd, vEnd, label, tickValues, tickAxis) {
+    const d0 = state.bounds.min[axes.d];
+    ctx.strokeStyle = "#22282e";
+    ctx.fillStyle = "#22282e";
+    ctx.lineWidth = 1.6;
+    linePoints(ctx, rect, planePoint(axes, uStart, vStart, d0), planePoint(axes, uEnd, vEnd, d0));
+    const end = projectPoint(rect, ...planePoint(axes, uEnd, vEnd, d0));
+    ctx.font = "15px Segoe UI, Arial";
+    ctx.fillText(label, end.x + 8, end.y - 8);
+    ctx.font = "12px Segoe UI, Arial";
+    tickValues.forEach((value) => {
+      const u = tickAxis === axes.u ? value : uStart;
+      const v = tickAxis === axes.v ? value : vStart;
+      const p = projectPoint(rect, ...planePoint(axes, u, v, d0));
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      ctx.fillText(formatTick(value), p.x + 5, p.y + 14);
+    });
+  }
+
+  function planePoint(axes, u, v, d) {
+    const point = [0, 0, 0];
+    point[axes.u] = u;
+    point[axes.v] = v;
+    point[axes.d] = d;
+    return point;
+  }
+
+  function axisName(index) {
+    return ["X", "Y", "Z"][index] || "";
   }
 
   function drawFloorGrid(ctx, rect, box) {
@@ -1166,26 +1236,91 @@
 
   function projectPoint(rect, x, y, z) {
     const b = state.bounds || { min: [-1, -1, -1], max: [1, 1, 1], span: 2 };
+    if (isPlaneView()) return projectPlanePoint(rect, x, y, z, b);
     const cx = (b.min[0] + b.max[0]) / 2;
     const cy = (b.min[1] + b.max[1]) / 2;
     const cz = (b.min[2] + b.max[2]) / 2;
     const px = x - cx;
     const py = y - cy;
     const pz = z - cz;
-    const cosy = Math.cos(state.angleY);
-    const siny = Math.sin(state.angleY);
-    const cosx = Math.cos(state.angleX);
-    const sinx = Math.sin(state.angleX);
-    const rx = px * cosy + pz * siny;
-    const rz = -px * siny + pz * cosy;
-    const ry = py * cosx - rz * sinx;
-    const depth = py * sinx + rz * cosx;
+    const basis = cameraBasis();
     const scale = 0.78 * Math.min(rect.width, rect.height) / Math.max(b.span, 1e-12) * state.zoom;
     return {
-      x: rect.width / 2 + state.panX + rx * scale,
-      y: rect.height / 2 + state.panY - ry * scale,
-      depth,
+      x: rect.width / 2 + state.panX + dot3([px, py, pz], basis.right) * scale,
+      y: rect.height / 2 + state.panY - dot3([px, py, pz], basis.up) * scale,
+      depth: dot3([px, py, pz], basis.forward),
     };
+  }
+
+  function cameraBasis() {
+    const elevation = state.angleX;
+    const azimuth = state.angleY;
+    const cosElev = Math.cos(elevation);
+    if (Math.abs(cosElev) < 0.03) {
+      const topSign = elevation >= 0 ? 1 : -1;
+      return {
+        right: [1, 0, 0],
+        up: [0, topSign, 0],
+        forward: [0, 0, -topSign],
+      };
+    }
+    const camera = normalize3([
+      cosElev * Math.cos(azimuth),
+      cosElev * Math.sin(azimuth),
+      Math.sin(elevation),
+    ]);
+    const forward = [-camera[0], -camera[1], -camera[2]];
+    const right = normalize3(cross3(forward, [0, 0, 1]));
+    const up = normalize3(cross3(right, forward));
+    return { right, up, forward };
+  }
+
+  function dot3(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+
+  function cross3(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0],
+    ];
+  }
+
+  function normalize3(v) {
+    const length = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / length, v[1] / length, v[2] / length];
+  }
+
+  function projectPlanePoint(rect, x, y, z, bounds) {
+    const axes = planeAxes(state.viewMode);
+    const values = [x, y, z];
+    const u = values[axes.u];
+    const v = values[axes.v];
+    const d = values[axes.d];
+    const u0 = bounds.min[axes.u];
+    const u1 = bounds.max[axes.u];
+    const v0 = bounds.min[axes.v];
+    const v1 = bounds.max[axes.v];
+    const du = Math.max(u1 - u0, 1e-12);
+    const dv = Math.max(v1 - v0, 1e-12);
+    const scale = 0.84 * Math.min(rect.width / du, rect.height / dv) * state.zoom;
+    return {
+      x: rect.width / 2 + state.panX + (u - 0.5 * (u0 + u1)) * scale,
+      y: rect.height / 2 + state.panY - (v - 0.5 * (v0 + v1)) * scale,
+      depth: d,
+    };
+  }
+
+  function planeAxes(mode) {
+    if (mode === "xy") return { u: 0, v: 1, d: 2 };
+    if (mode === "xz") return { u: 0, v: 2, d: 1 };
+    if (mode === "yz") return { u: 1, v: 2, d: 0 };
+    return { u: 0, v: 1, d: 2 };
+  }
+
+  function isPlaneView() {
+    return state.viewMode === "xy" || state.viewMode === "xz" || state.viewMode === "yz";
   }
 
   function recomputeBounds() {
@@ -1348,14 +1483,31 @@
   }
 
   function topView() {
-    state.angleX = -1.5708;
+    state.viewMode = "top";
+    state.angleX = 1.55;
     state.angleY = 0;
+    setActiveViewButton(el.topView);
     requestDraw();
   }
 
   function isoView() {
-    state.angleX = -0.55;
-    state.angleY = 0.72;
+    state.viewMode = "iso";
+    state.angleX = 0.62;
+    state.angleY = -0.78;
+    setActiveViewButton(el.isoView);
+    requestDraw();
+  }
+
+  function planeView(mode) {
+    state.viewMode = mode;
+    setActiveViewButton({ xy: el.xyView, xz: el.xzView, yz: el.yzView }[mode]);
+    fit();
+  }
+
+  function setActiveViewButton(activeButton) {
+    [el.topView, el.isoView, el.xyView, el.xzView, el.yzView].forEach((button) => {
+      if (button) button.classList.toggle("active", button === activeButton);
+    });
     requestDraw();
   }
 
@@ -1369,8 +1521,14 @@
     if (!state.dragging) return;
     const dx = event.clientX - state.lastX;
     const dy = event.clientY - state.lastY;
-    state.angleY += dx * 0.008;
-    state.angleX += dy * 0.008;
+    if (isPlaneView()) {
+      state.panX += dx;
+      state.panY += dy;
+    } else {
+      state.angleY += dx * 0.008;
+      state.angleX += dy * 0.008;
+      state.angleX = Math.max(-1.55, Math.min(1.55, state.angleX));
+    }
     state.lastX = event.clientX;
     state.lastY = event.clientY;
     requestDraw();
