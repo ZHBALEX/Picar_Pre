@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import struct
 
 import numpy as np
 
@@ -55,11 +57,14 @@ def surface_bodies_to_stl(
 
 def stl_to_surface_body(stl_file: str | Path, precision: int = 8) -> SurfaceBody:
     """Convert an STL triangular mesh to one SurfaceBody."""
-    import trimesh
+    try:
+        import trimesh
 
-    mesh = trimesh.load_mesh(Path(stl_file), process=False)
-    vertices = np.asarray(mesh.vertices)
-    faces = np.asarray(mesh.faces)
+        mesh = trimesh.load_mesh(Path(stl_file), process=False)
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.faces)
+    except ModuleNotFoundError:
+        vertices, faces = _read_stl_mesh_fallback(Path(stl_file))
 
     unique_vertices, inverse = np.unique(np.round(vertices, precision), axis=0, return_inverse=True)
     remapped_faces = inverse[faces] + 1
@@ -73,6 +78,50 @@ def stl_to_surface_body(stl_file: str | Path, precision: int = 8) -> SurfaceBody
     elems[:, 1:4] = remapped_faces
 
     return SurfaceBody(nodes=nodes, elems=elems)
+
+
+def _read_stl_mesh_fallback(stl_file: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Read ASCII or binary STL without optional trimesh dependency."""
+    data = stl_file.read_bytes()
+    vertices = _read_binary_stl_vertices(data)
+    if vertices is None:
+        vertices = _read_ascii_stl_vertices(data)
+    if vertices.size == 0:
+        raise ValueError(f"No STL triangles found in {stl_file}")
+    if vertices.shape[0] % 3 != 0:
+        raise ValueError(f"STL vertex count is not divisible by 3: {stl_file}")
+    faces = np.arange(vertices.shape[0], dtype=int).reshape((-1, 3))
+    return vertices, faces
+
+
+def _read_binary_stl_vertices(data: bytes) -> np.ndarray | None:
+    if len(data) < 84:
+        return None
+    triangle_count = struct.unpack_from("<I", data, 80)[0]
+    expected_size = 84 + triangle_count * 50
+    if expected_size != len(data):
+        return None
+    dtype = np.dtype([
+        ("normal", "<f4", (3,)),
+        ("vertices", "<f4", (3, 3)),
+        ("attribute", "<u2"),
+    ])
+    records = np.frombuffer(data, dtype=dtype, offset=84, count=triangle_count)
+    return np.asarray(records["vertices"], dtype=float).reshape((-1, 3))
+
+
+def _read_ascii_stl_vertices(data: bytes) -> np.ndarray:
+    text = data.decode("utf-8", errors="ignore")
+    points: list[list[float]] = []
+    for match in re.finditer(
+        r"^\s*vertex\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)\s+"
+        r"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)\s+"
+        r"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)",
+        text,
+        flags=re.MULTILINE,
+    ):
+        points.append([float(value.replace("D", "E").replace("d", "E")) for value in match.groups()])
+    return np.asarray(points, dtype=float)
 
 
 def cut_stl_with_box(stl_file: str | Path, box_bounds: list[float], output_stl: str | Path | None = None):

@@ -23,7 +23,7 @@ from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mes
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup14"
+CONSOLE_API_VERSION = "setup15"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (

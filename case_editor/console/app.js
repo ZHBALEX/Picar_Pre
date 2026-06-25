@@ -79,6 +79,7 @@
     loadedFiles: [],
     meshControlsReady: false,
     meshPreviewSuspended: false,
+    pendingGeometryFile: null,
     bounds: null,
     angleX: 0.62,
     angleY: -0.78,
@@ -200,16 +201,22 @@
 
   async function readFiles(files) {
     let loadedMeshInput = false;
+    let importedGeometry = false;
     for (const file of Array.from(files)) {
-      const text = await file.text();
       const lower = file.name.toLowerCase();
       if (lower.includes("unstruc_surface")) {
+        const text = await file.text();
         state.surface = parseSurface(text);
         addLoadedFile("surface", file.name, "dropped surface");
+        state.pendingGeometryFile = file;
       } else if (lower.endsWith(".stl")) {
-        setStatus("STL selected. Use Geometry > Import or Append STL.");
-        addLoadedFile(`stl:${file.name}`, file.name, "selected STL");
+        state.pendingGeometryFile = file;
+        addLoadedFile(`stl:${file.name}`, file.name, "importing STL");
+        renderLoadedFiles();
+        await importGeometry(false, file);
+        importedGeometry = true;
       } else if (isMeshInputName(lower)) {
+        const text = await file.text();
         const params = parseMeshInputText(text);
         fillMeshControls(params);
         state.meshControlsReady = true;
@@ -217,16 +224,20 @@
         loadedMeshInput = true;
         addLoadedFile("mesh-input", file.name, "loaded input");
       } else if (lower.startsWith("xgrid")) {
+        const text = await file.text();
         state.mesh.x = parseGridAxis(text);
         addLoadedFile("x", file.name, "dropped grid");
       } else if (lower.startsWith("ygrid")) {
+        const text = await file.text();
         state.mesh.y = parseGridAxis(text);
         addLoadedFile("y", file.name, "dropped grid");
       } else if (lower.startsWith("zgrid")) {
+        const text = await file.text();
         state.mesh.z = parseGridAxis(text);
         addLoadedFile("z", file.name, "dropped grid");
       }
     }
+    if (importedGeometry) return;
     if (!loadedMeshInput && state.mesh.x && state.mesh.y) {
       state.mesh.denseBox = inferDenseBox();
       fillMeshControls(paramsFromCurrentGrid());
@@ -284,6 +295,9 @@
     if (id === "mesh-input") {
       fillMeshControls(defaultMeshParams());
       state.meshControlsReady = true;
+    }
+    if (id.startsWith("stl:") && state.pendingGeometryFile && id === `stl:${state.pendingGeometryFile.name}`) {
+      state.pendingGeometryFile = null;
     }
     state.loadedFiles = state.loadedFiles.filter((item) => item.id !== id);
     if (!state.mesh.x || !state.mesh.y) state.mesh.denseBox = null;
@@ -846,32 +860,39 @@
     }
   }
 
-  async function importGeometry(append) {
-    const file = el.geometryFile.files && el.geometryFile.files[0];
+  async function importGeometry(append, explicitFile = null) {
+    const file = explicitFile || (el.geometryFile.files && el.geometryFile.files[0]) || state.pendingGeometryFile;
     if (!file) {
-      setStatus("Choose a .stl or .dat file first.");
+      setStatus("Choose or drop a .stl or .dat file first.");
       return;
     }
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith(".dat")) {
-      const content = await file.text();
-      await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
-    } else if (lower.endsWith(".stl")) {
-      const contentBase64 = await fileToBase64(file);
-      await postJson("/api/geometry/import-stl", {
-        case_dir: el.caseDir.value.trim(),
-        filename: file.name,
-        content_base64: contentBase64,
-        append,
-      });
-    } else {
-      setStatus("Geometry import supports .stl and .dat.");
-      return;
+    try {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".dat")) {
+        setStatus(`Importing surface: ${file.name}`);
+        const content = await file.text();
+        await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
+      } else if (lower.endsWith(".stl")) {
+        setStatus(`Importing STL: ${file.name}`);
+        const contentBase64 = await fileToBase64(file);
+        await postJson("/api/geometry/import-stl", {
+          case_dir: el.caseDir.value.trim(),
+          filename: file.name,
+          content_base64: contentBase64,
+          append,
+        });
+      } else {
+        setStatus("Geometry import supports .stl and .dat.");
+        return;
+      }
+      await loadCase();
+      state.pendingGeometryFile = null;
+      renderLoadedFiles();
+      renderBodyList();
+      setStatus(append ? "Geometry appended." : "Geometry imported.");
+    } catch (err) {
+      setStatus(`Geometry import failed: ${err.message || err}`);
     }
-    await loadCase();
-    renderLoadedFiles();
-    renderBodyList();
-    setStatus(append ? "Geometry appended." : "Geometry imported.");
   }
 
   async function exportStl() {
