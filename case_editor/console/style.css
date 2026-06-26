@@ -15,7 +15,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -60,7 +61,8 @@ h2 {
   color: #44505c;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   border: 1px solid #bac6d1;
   border-radius: 6px;
@@ -142,6 +144,7 @@ h2 {
 }
 
 .grid input,
+.grid select,
 .field input[type="file"] {
   width: 100%;
   min-width: 0;

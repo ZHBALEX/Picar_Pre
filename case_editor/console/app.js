@@ -47,6 +47,7 @@
     showMeshBounds: document.getElementById("showMeshBounds"),
     showDenseRegion: document.getElementById("showDenseRegion"),
     showFullMesh: document.getElementById("showFullMesh"),
+    showFortMotion: document.getElementById("showFortMotion"),
     showAxes: document.getElementById("showAxes"),
     loadedFiles: document.getElementById("loadedFiles"),
     geometryFile: document.getElementById("geometryFile"),
@@ -71,11 +72,21 @@
     previewMesh: document.getElementById("previewMesh"),
     saveMeshInput: document.getElementById("saveMeshInput"),
     generateMesh: document.getElementById("generateMesh"),
+    fortList: document.getElementById("fortList"),
+    fortBody: document.getElementById("fortBody"),
+    fortFrame: document.getElementById("fortFrame"),
+    fortSamples: document.getElementById("fortSamples"),
+    fortOrder: document.getElementById("fortOrder"),
+    fortMode: document.getElementById("fortMode"),
+    previewFort: document.getElementById("previewFort"),
+    clearFort: document.getElementById("clearFort"),
   };
 
   const state = {
     surface: null,
     mesh: { x: null, y: null, z: null, denseBox: null },
+    fort: null,
+    motion: null,
     loadedFiles: [],
     meshControlsReady: false,
     meshPreviewSuspended: false,
@@ -122,6 +133,7 @@
       el.showMeshBounds,
       el.showDenseRegion,
       el.showFullMesh,
+      el.showFortMotion,
       el.showAxes,
     ].forEach((node) => node.addEventListener("change", requestDraw));
     el.viewport.addEventListener("mousedown", startDrag);
@@ -142,6 +154,8 @@
     el.previewMesh.addEventListener("click", previewMeshFromControls);
     el.saveMeshInput.addEventListener("click", saveMeshInput);
     el.generateMesh.addEventListener("click", generateMesh);
+    el.previewFort.addEventListener("click", previewFortMotion);
+    el.clearFort.addEventListener("click", clearFortMotion);
     el.scaleRef.addEventListener("input", previewMeshFromControls);
     el.relax.addEventListener("input", previewMeshFromControls);
     window.addEventListener("resize", requestDraw);
@@ -162,7 +176,10 @@
 
       state.surface = null;
       state.mesh = { x: null, y: null, z: null, denseBox: null };
+      state.fort = report.fort || null;
+      state.motion = null;
       state.loadedFiles = [];
+      state.pendingGeometryFile = null;
 
       if (report.surface) {
         addLoadedFile("surface", "unstruc_surface_in.dat", "case surface");
@@ -181,6 +198,18 @@
             .catch(() => { state.mesh[axis] = null; }));
         });
       }
+      loads.push(fetchJson(`/api/fort/report${loadedQuery}`)
+        .then((fort) => {
+          state.fort = fort;
+        })
+        .catch((err) => {
+          state.fort = {
+            ok: false,
+            body_count: report.surface ? report.surface.bodies.length : 0,
+            files: [],
+            error: err.message || String(err),
+          };
+        }));
 
       await Promise.all(loads);
       await loadMeshInputControls({ preview: !report.mesh });
@@ -196,48 +225,53 @@
     }
     renderLoadedFiles();
     renderBodyList();
+    renderFortPanel();
     updateCommands();
   }
 
   async function readFiles(files) {
     let loadedMeshInput = false;
-    let importedGeometry = false;
+    let importedStlCount = 0;
     for (const file of Array.from(files)) {
-      const lower = file.name.toLowerCase();
-      if (lower.includes("unstruc_surface")) {
-        const text = await file.text();
-        state.surface = parseSurface(text);
-        addLoadedFile("surface", file.name, "dropped surface");
-        state.pendingGeometryFile = file;
-      } else if (lower.endsWith(".stl")) {
-        state.pendingGeometryFile = file;
-        addLoadedFile(`stl:${file.name}`, file.name, "importing STL");
-        renderLoadedFiles();
-        await importGeometry(false, file);
-        importedGeometry = true;
-      } else if (isMeshInputName(lower)) {
-        const text = await file.text();
-        const params = parseMeshInputText(text);
-        fillMeshControls(params);
-        state.meshControlsReady = true;
-        previewMeshFromControls();
-        loadedMeshInput = true;
-        addLoadedFile("mesh-input", file.name, "loaded input");
-      } else if (lower.startsWith("xgrid")) {
-        const text = await file.text();
-        state.mesh.x = parseGridAxis(text);
-        addLoadedFile("x", file.name, "dropped grid");
-      } else if (lower.startsWith("ygrid")) {
-        const text = await file.text();
-        state.mesh.y = parseGridAxis(text);
-        addLoadedFile("y", file.name, "dropped grid");
-      } else if (lower.startsWith("zgrid")) {
-        const text = await file.text();
-        state.mesh.z = parseGridAxis(text);
-        addLoadedFile("z", file.name, "dropped grid");
+      try {
+        const lower = file.name.toLowerCase();
+        if (lower.includes("unstruc_surface")) {
+          const text = await file.text();
+          state.surface = parseSurface(text);
+          addLoadedFile("surface", file.name, "dropped surface");
+          state.pendingGeometryFile = file;
+        } else if (lower.endsWith(".stl")) {
+          state.pendingGeometryFile = file;
+          addLoadedFile(`stl:${file.name}`, file.name, "importing STL");
+          renderLoadedFiles();
+          if (await importGeometry(importedStlCount > 0, file)) {
+            importedStlCount += 1;
+          }
+        } else if (isMeshInputName(lower)) {
+          const text = await file.text();
+          const params = parseMeshInputText(text);
+          fillMeshControls(params);
+          state.meshControlsReady = true;
+          previewMeshFromControls();
+          loadedMeshInput = true;
+          addLoadedFile("mesh-input", file.name, "loaded input");
+        } else if (lower.startsWith("xgrid")) {
+          const text = await file.text();
+          state.mesh.x = parseGridAxis(text);
+          addLoadedFile("x", file.name, "dropped grid");
+        } else if (lower.startsWith("ygrid")) {
+          const text = await file.text();
+          state.mesh.y = parseGridAxis(text);
+          addLoadedFile("y", file.name, "dropped grid");
+        } else if (lower.startsWith("zgrid")) {
+          const text = await file.text();
+          state.mesh.z = parseGridAxis(text);
+          addLoadedFile("z", file.name, "dropped grid");
+        }
+      } catch (err) {
+        setStatus(`Could not load ${file.name}: ${err.message || err}`);
       }
     }
-    if (importedGeometry) return;
     if (!loadedMeshInput && state.mesh.x && state.mesh.y) {
       state.mesh.denseBox = inferDenseBox();
       fillMeshControls(paramsFromCurrentGrid());
@@ -256,13 +290,17 @@
       setStatus("Choose a mesh_input_twolayers.dat file first.");
       return;
     }
-    const params = parseMeshInputText(await file.text());
-    fillMeshControls(params);
-    state.meshControlsReady = true;
-    previewMeshFromControls();
-    addLoadedFile("mesh-input", file.name, "loaded input");
-    renderLoadedFiles();
-    setStatus(`Loaded mesh input: ${file.name}`);
+    try {
+      const params = parseMeshInputText(await file.text());
+      fillMeshControls(params);
+      state.meshControlsReady = true;
+      previewMeshFromControls();
+      addLoadedFile("mesh-input", file.name, "loaded input");
+      renderLoadedFiles();
+      setStatus(`Loaded mesh input: ${file.name}`);
+    } catch (err) {
+      setStatus(`Load mesh input failed: ${err.message || err}`);
+    }
   }
 
   function addLoadedFile(id, name, kind) {
@@ -327,6 +365,75 @@
         </div>
       `;
     }).join("");
+  }
+
+  function renderFortPanel() {
+    if (!el.fortList || !el.fortBody) return;
+    const fort = state.fort || { body_count: state.surface ? state.surface.bodies.length : 0, files: [] };
+    const files = fort.files || [];
+    if (!files.length) {
+      const detail = fort.error ? `Fort report failed: ${fort.error}` : `No fort.* files found in ${el.caseDir.value.trim() || "case directory"}`;
+      el.fortList.innerHTML = `<div class="item-row"><span class="item-meta">${escapeHtml(detail)}</span></div>`;
+    } else {
+      el.fortList.innerHTML = files.map((item) => {
+        const status = item.ok
+          ? `${item.frames} frames, ${item.nodes} nodes${item.node_match === false ? " | node mismatch" : ""}`
+          : `invalid: ${item.error || "cannot read"}`;
+        return `
+          <div class="item-row">
+            <div class="item-main" title="${escapeHtml(item.path)}">Body ${item.body}: ${escapeHtml(item.name)}<br><span class="item-meta">${escapeHtml(status)}</span></div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    const bodyIds = files.length
+      ? files.map((item) => Number(item.body)).filter((value) => Number.isFinite(value) && value > 0)
+      : Array.from({ length: Number(fort.body_count || 0) }, (_, i) => i + 1);
+    const current = Number(el.fortBody.value) || bodyIds[0] || 1;
+    el.fortBody.innerHTML = bodyIds.length
+      ? bodyIds.map((id) => `<option value="${id}">Body ${id}</option>`).join("")
+      : `<option value="1">Body 1</option>`;
+    el.fortBody.value = bodyIds.includes(current) ? String(current) : String(bodyIds[0] || 1);
+  }
+
+  async function previewFortMotion() {
+    try {
+      const result = await postJson("/api/fort/preview", {
+        case_dir: el.caseDir.value.trim(),
+        body_id: Number(el.fortBody.value || 1),
+        frame: Number(el.fortFrame.value || -1),
+        samples: Number(el.fortSamples.value || 12),
+        component_order: el.fortOrder.value || "xyz",
+        motion_mode: el.fortMode.value || "velocity",
+      });
+      state.motion = {
+        bodyId: result.body_id,
+        nodeCount: result.node_count,
+        frame: result.frame,
+        frames: result.frames.map((frame) => ({
+          frame: frame.frame,
+          time: frame.time,
+          highlight: frame.highlight,
+          points: Float64Array.from(frame.points),
+        })),
+        info: result.info,
+      };
+      recomputeBounds();
+      fit();
+      setStatus(`Fort preview body ${result.body_id}, frame ${result.frame}.`);
+    } catch (err) {
+      state.motion = null;
+      requestDraw();
+      setStatus(`Fort preview failed: ${err.message || err}`);
+    }
+  }
+
+  function clearFortMotion() {
+    state.motion = null;
+    recomputeBounds();
+    requestDraw();
+    updateStats();
   }
 
   function selectedBodyIds() {
@@ -822,9 +929,13 @@
   }
 
   async function saveMeshInput() {
-    const result = await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
-    previewMeshFromControls();
-    setStatus(`Mesh input saved: ${result.path || "mesh_input_twolayers.dat"}`);
+    try {
+      const result = await postJson("/api/mesh/save", { case_dir: el.caseDir.value.trim(), params: readMeshParams() });
+      previewMeshFromControls();
+      setStatus(`Mesh input saved: ${result.path || "mesh_input_twolayers.dat"}`);
+    } catch (err) {
+      setStatus(`Save mesh input failed: ${err.message || err}`);
+    }
   }
 
   function readMeshOrigin() {
@@ -864,11 +975,15 @@
     const file = explicitFile || (el.geometryFile.files && el.geometryFile.files[0]) || state.pendingGeometryFile;
     if (!file) {
       setStatus("Choose or drop a .stl or .dat file first.");
-      return;
+      return false;
     }
     try {
       const lower = file.name.toLowerCase();
       if (lower.endsWith(".dat")) {
+        if (append) {
+          setStatus("Append supports STL files. Use Import to replace the surface with a DAT file.");
+          return false;
+        }
         setStatus(`Importing surface: ${file.name}`);
         const content = await file.text();
         await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
@@ -883,21 +998,33 @@
         });
       } else {
         setStatus("Geometry import supports .stl and .dat.");
-        return;
+        return false;
       }
       await loadCase();
       state.pendingGeometryFile = null;
       renderLoadedFiles();
       renderBodyList();
       setStatus(append ? "Geometry appended." : "Geometry imported.");
+      return true;
     } catch (err) {
       setStatus(`Geometry import failed: ${err.message || err}`);
+      return false;
     }
   }
 
   async function exportStl() {
-    const result = await postJson("/api/geometry/export-stl", { case_dir: el.caseDir.value.trim(), output: "surface_export.stl" });
-    setStatus(`STL exported: ${result.path}`);
+    try {
+      const ids = selectedBodyIds();
+      const result = await postJson("/api/geometry/export-stl", {
+        case_dir: el.caseDir.value.trim(),
+        output: "surface_export.stl",
+        body_ids: ids,
+      });
+      const selected = ids.length ? ` bodies ${ids.join(", ")}` : "";
+      setStatus(`STL exported${selected}: ${result.path}`);
+    } catch (err) {
+      setStatus(`STL export failed: ${err.message || err}`);
+    }
   }
 
   function fileToBase64(file) {
@@ -1018,6 +1145,7 @@
     if (el.showDenseRegion.checked) drawDenseRegion(ctx, rect);
     if (el.showFullMesh.checked) drawSampledGrid(ctx, rect);
     drawSurface(ctx, rect);
+    drawFortMotion(ctx, rect);
   }
 
   function drawSurface(ctx, rect) {
@@ -1040,6 +1168,63 @@
         }
       }
     });
+  }
+
+  function drawFortMotion(ctx, rect) {
+    if (!el.showFortMotion.checked || !state.motion || !state.surface) return;
+    const body = state.surface.bodies[state.motion.bodyId - 1];
+    if (!body) return;
+    state.motion.frames.forEach((frame) => {
+      drawMotionFrame(ctx, rect, body, frame.points, frame.highlight);
+    });
+  }
+
+  function drawMotionFrame(ctx, rect, body, points, highlight) {
+    const pointStride = Math.max(1, Math.ceil(body.nodeCount / (highlight ? MAX_SURFACE_POINTS : Math.floor(MAX_SURFACE_POINTS / 2))));
+    const triangleBudget = highlight ? MAX_SURFACE_TRIANGLES : Math.floor(MAX_SURFACE_TRIANGLES / 3);
+    const triStride = body.elemCount <= triangleBudget ? 1 : Math.ceil(body.elemCount / triangleBudget);
+    ctx.save();
+    ctx.globalAlpha = highlight ? 0.95 : 0.28;
+    ctx.strokeStyle = highlight ? "#d62828" : "#6d747c";
+    ctx.fillStyle = highlight ? "#d62828" : "#6d747c";
+    ctx.lineWidth = highlight ? 1.8 : 0.7;
+    if (body.elemCount) {
+      drawMotionTriangleWire(ctx, rect, body, points, triStride);
+    } else if (body.nodeCount > 1) {
+      ctx.beginPath();
+      for (let i = 0; i < body.nodeCount; i += 1) {
+        const p = projectPoint(rect, points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+    if (highlight) {
+      for (let i = 0; i < body.nodeCount; i += pointStride) {
+        const p = projectPoint(rect, points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
+        ctx.fillRect(p.x - 1.2, p.y - 1.2, 2.4, 2.4);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawMotionTriangleWire(ctx, rect, body, points, triStride) {
+    ctx.beginPath();
+    for (let e = 0; e < body.elemCount; e += triStride) {
+      const a = body.elems[e * 3];
+      const b = body.elems[e * 3 + 1];
+      const c = body.elems[e * 3 + 2];
+      if (!validBodyPointIndex(body, a) || !validBodyPointIndex(body, b) || !validBodyPointIndex(body, c)) continue;
+      const pa = projectPoint(rect, points[a * 3], points[a * 3 + 1], points[a * 3 + 2]);
+      const pb = projectPoint(rect, points[b * 3], points[b * 3 + 1], points[b * 3 + 2]);
+      const pc = projectPoint(rect, points[c * 3], points[c * 3 + 1], points[c * 3 + 2]);
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.lineTo(pc.x, pc.y);
+      ctx.lineTo(pa.x, pa.y);
+    }
+    ctx.stroke();
   }
 
   function drawMeshBounds(ctx, rect) {
@@ -1356,6 +1541,11 @@
         for (let i = 0; i < body.nodeCount; i += 1) add(body.points[i * 3], body.points[i * 3 + 1], body.points[i * 3 + 2]);
       });
     }
+    if (state.motion) {
+      state.motion.frames.forEach((frame) => {
+        for (let i = 0; i < frame.points.length; i += 3) add(frame.points[i], frame.points[i + 1], frame.points[i + 2]);
+      });
+    }
     const box = meshDomainBox();
     if (box) {
       add(box.x0, box.y0, box.z0);
@@ -1578,6 +1768,13 @@
       lines.push(`mesh x/y/z    : ${state.mesh.x.length} / ${state.mesh.y.length} / ${state.mesh.z ? state.mesh.z.length : 0}`);
       lines.push(`dense region  : ${state.mesh.denseBox ? "available" : "not found in mesh input"}`);
     }
+    if (state.fort && state.fort.files && state.fort.files.length) {
+      const okCount = state.fort.files.filter((item) => item.ok && item.node_match !== false).length;
+      lines.push(`fort files    : ${okCount} / ${state.fort.files.length} matched`);
+    }
+    if (state.motion) {
+      lines.push(`fort preview  : body ${state.motion.bodyId}, frame ${state.motion.frame}, samples ${state.motion.frames.length}`);
+    }
     setStatus(lines.join("\n") || "ready");
   }
 
@@ -1611,6 +1808,10 @@
     const lines = [`case: ${report.case_dir}`];
     if (report.surface) lines.push(`surface bodies: ${report.surface.bodies.length}`);
     if (report.mesh) lines.push(`mesh axes: ${report.mesh.axes.map((a) => `${a.axis}:${a.count}`).join(" ")}`);
+    if (report.fort && report.fort.files && report.fort.files.length) {
+      const okCount = report.fort.files.filter((item) => item.ok && item.node_match !== false).length;
+      lines.push(`fort files: ${okCount}/${report.fort.files.length} matched`);
+    }
     lines.push(`dense region: ${report.mesh && report.mesh.dense_box ? "available" : "not found"}`);
     lines.push(`validation: ${report.validation.length ? "FAIL" : "PASS"}`);
     report.validation.forEach((item) => lines.push(`- ${item}`));

@@ -20,10 +20,12 @@ from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
 from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
+from motion.fort import fort_motion_info  # noqa: E402
+from motion.visualize import motion_points_for_frames, sample_frame_indices  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup15"
+CONSOLE_API_VERSION = "setup18"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -85,6 +87,9 @@ def make_handler(default_case_dir: Path):
                 elif path == "/api/mesh-input":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_json(_mesh_input_payload(case_dir))
+                elif path == "/api/fort/report":
+                    case_dir = _case_dir_from_query(query, default_case_dir)
+                    self._send_json(_fort_report(case_dir))
                 elif path == "/api/surface":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_file_text(case_dir / "unstruc_surface_in.dat")
@@ -180,7 +185,7 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "stl_path": str(stl_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
     if path == "/api/geometry/export-stl":
         output = str(payload.get("output") or "surface_export.stl")
-        out, bodies = SurfaceProject(case_dir).export_stl(output=output)
+        out, bodies = SurfaceProject(case_dir).export_stl(output=output, body_ids=_payload_body_ids(payload))
         return {"ok": True, "path": str(out), "bodies": len(bodies)}
     if path == "/api/geometry/transform":
         body_ids = _payload_body_ids(payload)
@@ -203,6 +208,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         kept = [body for idx, body in enumerate(bodies, start=1) if idx not in body_ids]
         write_surface(project.surface_path, kept)
         return {"ok": True, "path": str(project.surface_path), "bodies": _json_ready(summarize_surface(kept)), "report": _case_report(case_dir)}
+    if path == "/api/fort/preview":
+        return _fort_preview_payload(case_dir, payload)
     raise ValueError(f"Unknown API route: {path}")
 
 
@@ -298,7 +305,104 @@ def _case_report(case_dir: Path) -> dict[str, object]:
             "errors": validate_mesh(mesh),
         }
 
+    payload["fort"] = _fort_report(case_dir)
     return payload
+
+
+def _fort_report(case_dir: Path, fort_start: int = 41) -> dict[str, object]:
+    surface_bodies = read_surface(case_dir / "unstruc_surface_in.dat") if (case_dir / "unstruc_surface_in.dat").exists() else []
+    files = []
+    for path in sorted(case_dir.glob("fort.*")):
+        suffix = path.name.split(".", 1)[1]
+        if not suffix.isdigit():
+            continue
+        body_id = int(suffix) - int(fort_start) + 1
+        if body_id <= 0:
+            continue
+        surface_nodes = surface_bodies[body_id - 1].node_count if body_id <= len(surface_bodies) else None
+        item: dict[str, object] = {
+            "body": body_id,
+            "path": str(path),
+            "name": path.name,
+            "surface_nodes": surface_nodes,
+            "ok": False,
+        }
+        try:
+            info = fort_motion_info(path)
+            item.update({
+                "ok": True,
+                "nodes": info.node_count,
+                "frames": info.frame_count,
+                "dt": info.dt,
+                "first_time": info.first_time,
+                "last_time": info.last_time,
+                "node_match": surface_nodes is None or surface_nodes == info.node_count,
+            })
+        except Exception as exc:
+            item["error"] = str(exc)
+        files.append(item)
+    return {
+        "ok": True,
+        "fort_start": fort_start,
+        "body_count": len(surface_bodies),
+        "files": files,
+    }
+
+
+def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    body_id = int(payload.get("body_id") or 1)
+    frame = int(payload.get("frame") if payload.get("frame") is not None else -1)
+    samples = max(1, min(int(payload.get("samples") or 12), 48))
+    component_order = str(payload.get("component_order") or "xyz")
+    motion_mode = str(payload.get("motion_mode") or "velocity")
+
+    bodies = read_surface(case_dir / "unstruc_surface_in.dat")
+    if body_id < 1 or body_id > len(bodies):
+        raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
+    body = bodies[body_id - 1]
+    fort_path = case_dir / f"fort.{41 + body_id - 1}"
+    if not fort_path.exists():
+        raise FileNotFoundError(f"Motion file not found for body {body_id}: {fort_path}")
+
+    info = fort_motion_info(fort_path)
+    if info.node_count != body.node_count:
+        raise ValueError(f"fort node count {info.node_count} does not match body {body_id} surface nodes {body.node_count}")
+    if frame < 0:
+        frame = info.frame_count + frame
+    if frame < 0 or frame >= info.frame_count:
+        raise ValueError(f"frame must be in [-{info.frame_count}, {info.frame_count - 1}], got {payload.get('frame')}")
+
+    frame_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    point_frames, times = motion_points_for_frames(
+        body,
+        fort_path,
+        frame_indices,
+        component_order=component_order,
+        motion_mode=motion_mode,
+    )
+    frames = [
+        {
+            "frame": frame_index,
+            "time": times[frame_index],
+            "highlight": frame_index == frame,
+            "points": _json_ready(point_frames[frame_index].reshape(-1)),
+        }
+        for frame_index in frame_indices
+    ]
+    return {
+        "ok": True,
+        "body_id": body_id,
+        "node_count": body.node_count,
+        "frame": frame,
+        "frames": frames,
+        "info": {
+            "nodes": info.node_count,
+            "frames": info.frame_count,
+            "dt": info.dt,
+            "first_time": info.first_time,
+            "last_time": info.last_time,
+        },
+    }
 
 
 def _mesh_input_payload(case_dir: Path) -> dict[str, object]:

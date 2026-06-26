@@ -50,8 +50,11 @@ def surface_bodies_to_stl(
     """Export triangulated unstructured surface bodies to an STL file."""
     out = Path(output_stl)
     out.parent.mkdir(parents=True, exist_ok=True)
-    mesh = surface_bodies_to_trimesh(bodies)
-    mesh.export(out)
+    try:
+        mesh = surface_bodies_to_trimesh(bodies)
+        mesh.export(out)
+    except ModuleNotFoundError:
+        _write_binary_stl_fallback(bodies, out)
     return out
 
 
@@ -122,6 +125,37 @@ def _read_ascii_stl_vertices(data: bytes) -> np.ndarray:
     ):
         points.append([float(value.replace("D", "E").replace("d", "E")) for value in match.groups()])
     return np.asarray(points, dtype=float)
+
+
+def _write_binary_stl_fallback(bodies: list[SurfaceBody], output_stl: Path) -> None:
+    triangles = []
+    for body_index, body in enumerate(bodies, start=1):
+        if body.elem_count == 0:
+            raise ValueError(f"Cannot export body {body_index} with zero elements to STL")
+        node_ids = body.nodes[:, 0].astype(int)
+        id_to_index = {node_id: idx for idx, node_id in enumerate(node_ids)}
+        for elem in body.elems[:, 1:4].astype(int):
+            try:
+                tri = body.points[[id_to_index[int(node_id)] for node_id in elem]]
+            except KeyError as exc:
+                raise ValueError(f"Element references missing node id {exc.args[0]}") from exc
+            triangles.append(np.asarray(tri, dtype=np.float32))
+
+    header = b"Picar_Pre binary STL".ljust(80, b" ")
+    with output_stl.open("wb") as handle:
+        handle.write(header)
+        handle.write(struct.pack("<I", len(triangles)))
+        for tri in triangles:
+            normal = _triangle_normal(tri)
+            handle.write(struct.pack("<12fH", *normal, *tri.reshape(9), 0))
+
+
+def _triangle_normal(triangle: np.ndarray) -> np.ndarray:
+    normal = np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
+    length = float(np.linalg.norm(normal))
+    if length <= 0.0:
+        return np.zeros(3, dtype=np.float32)
+    return np.asarray(normal / length, dtype=np.float32)
 
 
 def cut_stl_with_box(stl_file: str | Path, box_bounds: list[float], output_stl: str | Path | None = None):

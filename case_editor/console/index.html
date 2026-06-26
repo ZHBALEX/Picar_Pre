@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup23">
+  <link rel="stylesheet" href="style.css?v=setup28">
 </head>
 <body>
   <main class="shell">
@@ -41,6 +41,7 @@
           <label><input id="showMeshBounds" type="checkbox" checked> mesh boundary</label>
           <label><input id="showDenseRegion" type="checkbox" checked> dense region</label>
           <label><input id="showFullMesh" type="checkbox"> sampled grid</label>
+          <label><input id="showFortMotion" type="checkbox" checked> fort motion</label>
           <label><input id="showAxes" type="checkbox" checked> axes and ticks</label>
         </div>
       </section>
@@ -95,7 +96,35 @@
       </section>
       <section id="fortPanel" class="control-panel">
         <h2>Fort</h2>
-        <p class="hint">Fort/motion editing will be added after geometry and mesh setup are stable.</p>
+        <div id="fortList" class="item-list"></div>
+        <div class="grid two">
+          <label>Body<select id="fortBody"></select></label>
+          <label>Frame<input id="fortFrame" type="number" step="1" value="-1"></label>
+        </div>
+        <div class="grid two">
+          <label>Samples<input id="fortSamples" type="number" min="1" step="1" value="12"></label>
+          <label>Order<select id="fortOrder">
+            <option value="xyz">xyz</option>
+            <option value="yxz">yxz</option>
+            <option value="xzy">xzy</option>
+            <option value="zxy">zxy</option>
+            <option value="yzx">yzx</option>
+            <option value="zyx">zyx</option>
+          </select></label>
+        </div>
+        <label class="field">
+          <span>Motion mode</span>
+          <select id="fortMode">
+            <option value="velocity">velocity</option>
+            <option value="displacement">displacement</option>
+            <option value="relative">relative</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button id="previewFort" type="button">Preview Motion</button>
+          <button id="clearFort" type="button">Clear Motion</button>
+        </div>
+        <p class="hint">Gray outlines are sampled fort frames; red is the selected frame.</p>
       </section>
       <section>
         <h2>Commands</h2>
@@ -122,6 +151,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup23"></script>
+  <script src="app.js?v=setup28"></script>
 </body>
 </html>
