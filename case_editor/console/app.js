@@ -198,18 +198,27 @@
             .catch(() => { state.mesh[axis] = null; }));
         });
       }
-      loads.push(fetchJson(`/api/fort/report${loadedQuery}`)
-        .then((fort) => {
-          state.fort = fort;
-        })
-        .catch((err) => {
-          state.fort = {
-            ok: false,
-            body_count: report.surface ? report.surface.bodies.length : 0,
-            files: [],
-            error: err.message || String(err),
-          };
-        }));
+      if (backendSupportsFort(report)) {
+        loads.push(fetchJson(`/api/fort/report${loadedQuery}`)
+          .then((fort) => {
+            state.fort = fort;
+          })
+          .catch((err) => {
+            state.fort = {
+              ok: false,
+              body_count: report.surface ? report.surface.bodies.length : 0,
+              files: [],
+              error: cleanErrorMessage(err),
+            };
+          }));
+      } else {
+        state.fort = {
+          ok: false,
+          body_count: report.surface ? report.surface.bodies.length : 0,
+          files: [],
+          error: "Fort preview API is missing. Restart the console with `python -B picar_console.py`.",
+        };
+      }
 
       await Promise.all(loads);
       await loadMeshInputControls({ preview: !report.mesh });
@@ -221,7 +230,7 @@
         updateStats();
       }
     } catch (err) {
-      setStatus(String(err));
+      setStatus(cleanErrorMessage(err));
     }
     renderLoadedFiles();
     renderBodyList();
@@ -399,11 +408,12 @@
 
   async function previewFortMotion() {
     try {
+      await requireFortPreviewApi();
       const result = await postJson("/api/fort/preview", {
         case_dir: el.caseDir.value.trim(),
         body_id: Number(el.fortBody.value || 1),
         frame: Number(el.fortFrame.value || -1),
-        samples: Number(el.fortSamples.value || 12),
+        samples: Number(el.fortSamples.value || 24),
         component_order: el.fortOrder.value || "xyz",
         motion_mode: el.fortMode.value || "velocity",
       });
@@ -421,11 +431,11 @@
       };
       recomputeBounds();
       fit();
-      setStatus(`Fort preview body ${result.body_id}, frame ${result.frame}.`);
+      setStatus(`Fort preview body ${result.body_id}, frame ${result.frame}, ${result.frames.length} sampled snapshots.`);
     } catch (err) {
       state.motion = null;
       requestDraw();
-      setStatus(`Fort preview failed: ${err.message || err}`);
+      setStatus(`Fort preview failed: ${cleanErrorMessage(err)}`);
     }
   }
 
@@ -497,6 +507,17 @@
     if (!health.geometry_transform) {
       throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before editing bodies.");
     }
+  }
+
+  async function requireFortPreviewApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.fort_preview) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before previewing fort motion.");
+    }
+  }
+
+  function backendSupportsFort(report) {
+    return !!(report && report.fort);
   }
 
   function isMeshInputName(name) {
@@ -1175,56 +1196,22 @@
     const body = state.surface.bodies[state.motion.bodyId - 1];
     if (!body) return;
     state.motion.frames.forEach((frame) => {
-      drawMotionFrame(ctx, rect, body, frame.points, frame.highlight);
+      drawMotionFramePoints(ctx, rect, body, frame.points, frame.highlight);
     });
   }
 
-  function drawMotionFrame(ctx, rect, body, points, highlight) {
-    const pointStride = Math.max(1, Math.ceil(body.nodeCount / (highlight ? MAX_SURFACE_POINTS : Math.floor(MAX_SURFACE_POINTS / 2))));
-    const triangleBudget = highlight ? MAX_SURFACE_TRIANGLES : Math.floor(MAX_SURFACE_TRIANGLES / 3);
-    const triStride = body.elemCount <= triangleBudget ? 1 : Math.ceil(body.elemCount / triangleBudget);
+  function drawMotionFramePoints(ctx, rect, body, points, highlight) {
     ctx.save();
-    ctx.globalAlpha = highlight ? 0.95 : 0.28;
-    ctx.strokeStyle = highlight ? "#d62828" : "#6d747c";
-    ctx.fillStyle = highlight ? "#d62828" : "#6d747c";
-    ctx.lineWidth = highlight ? 1.8 : 0.7;
-    if (body.elemCount) {
-      drawMotionTriangleWire(ctx, rect, body, points, triStride);
-    } else if (body.nodeCount > 1) {
-      ctx.beginPath();
-      for (let i = 0; i < body.nodeCount; i += 1) {
-        const p = projectPoint(rect, points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      }
-      ctx.closePath();
-      ctx.stroke();
-    }
-    if (highlight) {
-      for (let i = 0; i < body.nodeCount; i += pointStride) {
-        const p = projectPoint(rect, points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
-        ctx.fillRect(p.x - 1.2, p.y - 1.2, 2.4, 2.4);
-      }
+    ctx.globalAlpha = highlight ? 0.92 : 0.16;
+    ctx.fillStyle = highlight ? "#d62828" : "#7d858d";
+    const radius = highlight ? 1.15 : 0.65;
+    for (let i = 0; i < body.nodeCount; i += 1) {
+      const offset = i * 3;
+      if (offset + 2 >= points.length) break;
+      const p = projectPoint(rect, points[offset], points[offset + 1], points[offset + 2]);
+      ctx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
     }
     ctx.restore();
-  }
-
-  function drawMotionTriangleWire(ctx, rect, body, points, triStride) {
-    ctx.beginPath();
-    for (let e = 0; e < body.elemCount; e += triStride) {
-      const a = body.elems[e * 3];
-      const b = body.elems[e * 3 + 1];
-      const c = body.elems[e * 3 + 2];
-      if (!validBodyPointIndex(body, a) || !validBodyPointIndex(body, b) || !validBodyPointIndex(body, c)) continue;
-      const pa = projectPoint(rect, points[a * 3], points[a * 3 + 1], points[a * 3 + 2]);
-      const pb = projectPoint(rect, points[b * 3], points[b * 3 + 1], points[b * 3 + 2]);
-      const pc = projectPoint(rect, points[c * 3], points[c * 3 + 1], points[c * 3 + 2]);
-      ctx.moveTo(pa.x, pa.y);
-      ctx.lineTo(pb.x, pb.y);
-      ctx.lineTo(pc.x, pc.y);
-      ctx.lineTo(pa.x, pa.y);
-    }
-    ctx.stroke();
   }
 
   function drawMeshBounds(ctx, rect) {
@@ -1773,7 +1760,7 @@
       lines.push(`fort files    : ${okCount} / ${state.fort.files.length} matched`);
     }
     if (state.motion) {
-      lines.push(`fort preview  : body ${state.motion.bodyId}, frame ${state.motion.frame}, samples ${state.motion.frames.length}`);
+      lines.push(`fort preview  : body ${state.motion.bodyId}, frame ${state.motion.frame}, snapshots ${state.motion.frames.length}`);
     }
     setStatus(lines.join("\n") || "ready");
   }
@@ -1829,8 +1816,9 @@
 
   async function fetchText(url) {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
+    const text = await res.text();
+    if (!res.ok) throw new Error(readResponseError(text, res.statusText));
+    return text;
   }
 
   async function fetchJson(url) {
@@ -1844,8 +1832,32 @@
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
-    if (!res.ok || data.ok === false) throw new Error(data.error || text || res.statusText);
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok || data.ok === false) throw new Error(data.error || readResponseError(text, res.statusText));
     return data;
+  }
+
+  function readResponseError(text, fallback) {
+    const value = String(text || "").trim();
+    if (!value) return fallback || "Request failed";
+    try {
+      const data = JSON.parse(value);
+      if (data.error) return data.error;
+      if (data.message) return data.message;
+    } catch {
+      // Fall through to HTML/text cleanup.
+    }
+    const title = value.match(/<p>Message:\s*([^<]+)<\/p>/i);
+    if (title) return title[1].trim();
+    return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function cleanErrorMessage(err) {
+    return readResponseError(err && err.message ? err.message : String(err), "Request failed");
   }
 }());

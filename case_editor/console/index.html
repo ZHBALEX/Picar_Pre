@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup28">
+  <link rel="stylesheet" href="style.css?v=setup33">
 </head>
 <body>
   <main class="shell">
@@ -101,8 +101,8 @@
           <label>Body<select id="fortBody"></select></label>
           <label>Frame<input id="fortFrame" type="number" step="1" value="-1"></label>
         </div>
+        <label>Snapshots<input id="fortSamples" type="number" min="1" step="1" value="24"></label>
         <div class="grid two">
-          <label>Samples<input id="fortSamples" type="number" min="1" step="1" value="12"></label>
           <label>Order<select id="fortOrder">
             <option value="xyz">xyz</option>
             <option value="yxz">yxz</option>
@@ -124,7 +124,7 @@
           <button id="previewFort" type="button">Preview Motion</button>
           <button id="clearFort" type="button">Clear Motion</button>
         </div>
-        <p class="hint">Gray outlines are sampled fort frames; red is the selected frame.</p>
+        <p class="hint">Gray points are sampled fort snapshots; red is the selected frame.</p>
       </section>
       <section>
         <h2>Commands</h2>
@@ -151,6 +151,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup28"></script>
+  <script src="app.js?v=setup33"></script>
 </body>
 </html>

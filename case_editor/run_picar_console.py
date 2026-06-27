@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import numpy as np
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -21,11 +23,11 @@ from geometry.unstructure_surface.surface import read_surface, summarize_surface
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
 from motion.fort import fort_motion_info  # noqa: E402
-from motion.visualize import motion_points_for_frames, sample_frame_indices  # noqa: E402
+from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup18"
+CONSOLE_API_VERSION = "setup23"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -81,6 +83,7 @@ def make_handler(default_case_dir: Path):
                         "api_version": CONSOLE_API_VERSION,
                         "origin_shift": True,
                         "geometry_transform": True,
+                        "fort_preview": True,
                     })
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
@@ -352,7 +355,7 @@ def _fort_report(case_dir: Path, fort_start: int = 41) -> dict[str, object]:
 def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
     body_id = int(payload.get("body_id") or 1)
     frame = int(payload.get("frame") if payload.get("frame") is not None else -1)
-    samples = max(1, min(int(payload.get("samples") or 12), 48))
+    samples = max(1, min(int(payload.get("samples") or 24), 96))
     component_order = str(payload.get("component_order") or "xyz")
     motion_mode = str(payload.get("motion_mode") or "velocity")
 
@@ -372,7 +375,7 @@ def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[st
     if frame < 0 or frame >= info.frame_count:
         raise ValueError(f"frame must be in [-{info.frame_count}, {info.frame_count - 1}], got {payload.get('frame')}")
 
-    frame_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    frame_indices = _fort_preview_frame_indices(info.frame_count, samples, frame)
     point_frames, times = motion_points_for_frames(
         body,
         fort_path,
@@ -403,6 +406,17 @@ def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[st
             "last_time": info.last_time,
         },
     }
+
+
+def _fort_preview_frame_indices(frame_count: int, samples: int, highlight_frame: int) -> list[int]:
+    if frame_count <= 0:
+        return []
+    samples = max(1, min(int(samples), int(frame_count)))
+    indices = np.linspace(0, frame_count - 1, samples, dtype=int).tolist()
+    if highlight_frame not in indices:
+        nearest = min(range(len(indices)), key=lambda idx: abs(indices[idx] - highlight_frame))
+        indices[nearest] = int(highlight_frame)
+    return sorted(set(indices))
 
 
 def _mesh_input_payload(case_dir: Path) -> dict[str, object]:

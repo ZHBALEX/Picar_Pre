@@ -46,10 +46,13 @@ def sample_frame_indices(frame_count: int, samples: int, highlight_frame: int | 
     if frame_count <= 0:
         return []
     samples = max(1, min(int(samples), frame_count))
-    indices = set(np.linspace(0, frame_count - 1, samples, dtype=int).tolist())
+    indices = np.linspace(0, frame_count - 1, samples, dtype=int).tolist()
     if highlight_frame is not None:
-        indices.add(int(highlight_frame))
-    return sorted(indices)
+        highlight_frame = int(highlight_frame)
+        if highlight_frame not in indices:
+            nearest = min(range(len(indices)), key=lambda idx: abs(indices[idx] - highlight_frame))
+            indices[nearest] = highlight_frame
+    return sorted(set(indices))
 
 
 def plot_motion_2d(
@@ -71,7 +74,6 @@ def plot_motion_2d(
 
         matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
-    from matplotlib.collections import LineCollection
     _apply_jfm_style(plt)
 
     info = fort_motion_info(fort_path)
@@ -88,21 +90,16 @@ def plot_motion_2d(
 
     fig, ax = plt.subplots(figsize=figsize)
     all_points = []
-    line_indices = _reference_polyline_indices(body, axes)
 
     for sample_idx in sample_indices:
         deformed = body_from_points(body, frame_points[sample_idx])
-        all_points.append(deformed.points[:, axes])
+        pts = deformed.points[:, axes]
+        all_points.append(pts)
         color = "red" if sample_idx == frame else "0.65"
-        linewidth = 1.8 if sample_idx == frame else 0.45
         alpha = 0.95 if sample_idx == frame else 0.35
         zorder = 5 if sample_idx == frame else 1
-        lines = _polyline_from_indices(deformed.points[:, axes], line_indices) if line_indices is not None else _projected_lines(deformed, axes)
-        if lines:
-            ax.add_collection(LineCollection(lines, colors=color, linewidths=linewidth, alpha=alpha, zorder=zorder))
-        else:
-            pts = deformed.points[:, axes]
-            ax.plot(pts[:, 0], pts[:, 1], color=color, linewidth=linewidth, alpha=alpha, zorder=zorder)
+        size = 2.0 if sample_idx == frame else 0.8
+        ax.scatter(pts[:, 0], pts[:, 1], s=size, c=color, alpha=alpha, linewidths=0, zorder=zorder)
 
     all_points_arr = np.vstack(all_points)
     _set_equal_2d_limits(ax, all_points_arr)
@@ -327,59 +324,6 @@ def _plane_axes(plane: str) -> tuple[int, int]:
     if plane not in axes:
         raise ValueError("plane must be one of: xy, xz, yz")
     return axes[plane]
-
-
-def _projected_lines(body: SurfaceBody, axes: tuple[int, int]) -> list[list[np.ndarray]]:
-    points = body.points[:, axes]
-    if body.elem_count > 0:
-        node_map = {int(body.nodes[i, 0]): i for i in range(len(body.nodes))}
-        lines = []
-        for _, n1, n2, n3 in body.elems:
-            try:
-                p1 = points[node_map[int(n1)]]
-                p2 = points[node_map[int(n2)]]
-                p3 = points[node_map[int(n3)]]
-            except KeyError:
-                continue
-            lines.extend([[p1, p2], [p2, p3], [p3, p1]])
-        return lines
-
-    if len(points) < 2:
-        return []
-    lines = [[points[idx], points[idx + 1]] for idx in range(len(points) - 1)]
-    lines.append([points[-1], points[0]])
-    return lines
-
-
-def _reference_polyline_indices(body: SurfaceBody, axes: tuple[int, int]) -> np.ndarray | None:
-    """Return representative reference node indices for clean 2D outlines."""
-    if axes != (0, 1) or body.node_count < 6:
-        return None
-
-    z_values = body.points[:, 2]
-    z_span = float(z_values.max() - z_values.min())
-    xy_span = float((body.points[:, :2].max(axis=0) - body.points[:, :2].min(axis=0)).max())
-    if xy_span <= 0.0 or z_span > 0.1 * xy_span:
-        return None
-
-    rounded_z = np.round(z_values, decimals=10)
-    unique_z = np.unique(rounded_z)
-    if len(unique_z) < 2 or len(unique_z) > 20:
-        return None
-
-    target_z = unique_z[0]
-    layer_idx = np.flatnonzero(rounded_z == target_z)
-    if len(layer_idx) < 3:
-        return None
-
-    return layer_idx
-
-
-def _polyline_from_indices(points: np.ndarray, indices: np.ndarray) -> list[list[np.ndarray]]:
-    points = points[indices]
-    lines = [[points[idx], points[idx + 1]] for idx in range(len(points) - 1)]
-    lines.append([points[-1], points[0]])
-    return lines
 
 
 def _apply_jfm_style(plt) -> None:

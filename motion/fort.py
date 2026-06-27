@@ -45,12 +45,16 @@ def fort_motion_info(path: str | Path) -> FortMotionInfo:
     path = Path(path)
     file_size = path.stat().st_size
     first = read_frame_header(path, 0)
+    if first.node_count <= 0:
+        raise ValueError(f"{path} has invalid node count {first.node_count}")
     frame_size = frame_size_for_nodes(first.node_count)
     if file_size % frame_size != 0:
         raise ValueError(f"{path} size {file_size} is not divisible by frame size {frame_size}")
 
     frame_count = file_size // frame_size
     last = read_frame_header(path, frame_count - 1)
+    if last.node_count != first.node_count:
+        raise ValueError(f"{path} node count changed from {first.node_count} to {last.node_count}")
     return FortMotionInfo(
         path=path,
         node_count=first.node_count,
