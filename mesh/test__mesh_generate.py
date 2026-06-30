@@ -71,6 +71,27 @@ def test_write_and_read_mesh(tmp_path: Path) -> None:
     assert np.allclose(mesh.z.values, reread.z.values)
 
 
+def test_generate_z_axis_when_lz_positive_without_dense_z() -> None:
+    params = sample_mesh_params()
+    params.update(
+        {
+            "Lz": 4.0,
+            "z_center_dense": 2.0,
+            "Lz_dense": 0.0,
+            "Nz_dense": 0,
+            "len_front": 0.0,
+            "len_back": 0.0,
+            "n_front_stretch": 0,
+            "n_front_uniform": 0,
+            "n_back_uniform": 0,
+            "n_back_stretch": 0,
+        }
+    )
+    mesh = generate_mesh(params)
+    assert mesh.z is not None
+    assert np.allclose(mesh.z.values, [0.0, 4.0])
+
+
 def test_optimizer_supports_dense_and_balanced_priorities() -> None:
     params = sample_mesh_params()
     params.update(

@@ -255,7 +255,7 @@ def _has_z_params(params: dict[str, object]) -> bool:
     ]
     if not all(key in params for key in z_keys):
         return False
-    return float(params["Lz"]) > 0.0 and int(params["Nz_dense"]) > 0
+    return float(params["Lz"]) > 0.0
 
 
 def _repair_strictly_increasing(nodes: np.ndarray, length: float) -> np.ndarray:

@@ -221,7 +221,7 @@
       }
 
       await Promise.all(loads);
-      await loadMeshInputControls({ preview: !report.mesh });
+      await loadMeshInputControls({ preview: false });
       recomputeBounds();
       fit();
       if (report.mesh || !state.mesh.x || !state.mesh.y) {
@@ -986,7 +986,7 @@
       }
       recomputeBounds();
       requestDraw();
-      setStatus("xgrid/ygrid/zgrid generated.");
+      setStatus(result.mesh && result.mesh.z.length ? "xgrid/ygrid/zgrid generated." : "xgrid/ygrid generated; set a positive Z range to write zgrid.dat.");
     } catch (err) {
       setStatus(`Generate XYZ failed: ${err.message || err}`);
     }
