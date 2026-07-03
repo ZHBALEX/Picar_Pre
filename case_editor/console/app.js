@@ -845,7 +845,7 @@
       const params = readMeshParams();
       state.mesh.x = makeAxisNodesFromControls("x");
       state.mesh.y = makeAxisNodesFromControls("y");
-      state.mesh.z = params.Lz > 0 && axisIntervalCount("z") > 0 ? makeAxisNodesFromControls("z") : null;
+      state.mesh.z = params.Lz > 0 ? makeAxisNodesFromControls("z") : null;
       const x = readAxisControls("x");
       const y = readAxisControls("y");
       const z = readAxisControls("z");
