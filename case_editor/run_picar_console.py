@@ -90,6 +90,9 @@ def make_handler(default_case_dir: Path):
                 elif path == "/api/mesh-input":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_json(_mesh_input_payload(case_dir))
+                elif path == "/api/amr":
+                    case_dir = _case_dir_from_query(query, default_case_dir)
+                    self._send_json(_amr_payload(case_dir))
                 elif path == "/api/fort/report":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_json(_fort_report(case_dir))
@@ -170,6 +173,14 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         _shift_mesh(mesh, _payload_mesh_origin(payload))
         write_mesh(case_dir, mesh, include_index=True)
         return {"ok": True, "input_path": str(out), "mesh": _mesh_payload(mesh), "report": _case_report(case_dir)}
+    if path == "/api/amr/save":
+        amr = payload.get("amr")
+        if not isinstance(amr, dict):
+            raise ValueError("Missing AMR payload")
+        case_dir.mkdir(parents=True, exist_ok=True)
+        out = case_dir / "amr_in.dat"
+        out.write_text(_format_amr_payload(amr), encoding="utf-8")
+        return {"ok": True, "path": str(out), "amr": _amr_payload(case_dir)}
     if path == "/api/geometry/save-surface":
         content = str(payload.get("content") or "")
         out = case_dir / str(payload.get("surface_name") or "unstruc_surface_in.dat")
@@ -288,6 +299,7 @@ def _case_report(case_dir: Path) -> dict[str, object]:
         "validation": validation,
         "surface": None,
         "mesh": None,
+        "amr": None,
     }
 
     surface_path = case_dir / "unstruc_surface_in.dat"
@@ -308,8 +320,117 @@ def _case_report(case_dir: Path) -> dict[str, object]:
             "errors": validate_mesh(mesh),
         }
 
+    amr_path = case_dir / "amr_in.dat"
+    if amr_path.exists():
+        try:
+            payload["amr"] = _amr_payload(case_dir)
+        except Exception as exc:
+            payload["amr"] = {"ok": False, "path": str(amr_path), "error": str(exc), "layers": [], "block_count": 0}
+
     payload["fort"] = _fort_report(case_dir)
     return payload
+
+
+def _amr_payload(case_dir: Path) -> dict[str, object]:
+    path = case_dir / "amr_in.dat"
+    if not path.exists():
+        return {"ok": False, "path": str(path), "layers": [], "block_count": 0, "error": "Missing amr_in.dat"}
+    payload = _parse_amr_text(path.read_text(encoding="utf-8", errors="replace"))
+    payload["ok"] = True
+    payload["path"] = str(path)
+    payload["block_count"] = sum(len(layer["blocks"]) for layer in payload["layers"])
+    return payload
+
+
+def _parse_amr_text(text: str) -> dict[str, object]:
+    lines = text.splitlines()
+    resize = 0
+    layers: list[dict[str, object]] = []
+    current_layer: dict[str, object] | None = None
+    expected_blocks: int | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        numbers = _amr_numbers(line)
+        if "AMR_RESIZE" in line and numbers:
+            resize = int(numbers[0])
+            continue
+        if "AMR Layer" in line:
+            layer_number = int(numbers[-1]) if numbers else len(layers) + 1
+            current_layer = {"layer": layer_number, "blocks": []}
+            layers.append(current_layer)
+            expected_blocks = None
+            continue
+        if current_layer is None:
+            continue
+        if expected_blocks is None and len(numbers) == 1:
+            expected_blocks = int(numbers[0])
+            continue
+        if len(numbers) < 9:
+            continue
+        block = {
+            "id": int(numbers[0]),
+            "parent": int(numbers[1]),
+            "start": [float(numbers[2]), float(numbers[3]), float(numbers[4])],
+            "end": [float(numbers[5]), float(numbers[6]), float(numbers[7])],
+            "moving": int(numbers[8]),
+        }
+        current_layer["blocks"].append(block)
+        if expected_blocks is not None and len(current_layer["blocks"]) >= expected_blocks:
+            expected_blocks = None
+
+    return {"resize": resize, "layers": layers}
+
+
+def _amr_numbers(text: str) -> list[float]:
+    import re
+
+    return [float(item.replace("D", "E").replace("d", "e")) for item in re.findall(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?", text)]
+
+
+def _format_amr_payload(payload: dict[str, object]) -> str:
+    resize = int(payload.get("resize") or 0)
+    raw_layers = payload.get("layers") or []
+    if not isinstance(raw_layers, list):
+        raise ValueError("AMR layers must be a list")
+    lines = [
+        f"{resize}               AMR_RESIZE (0 do not resize, 1 use the closest multigrid-able size, 2 use a larger multigrid-able size)",
+        "",
+        "Block ID | Parent Block\t| Point_start \tPoint_end|AMR_moving",
+    ]
+    for layer_index, raw_layer in enumerate(raw_layers, start=1):
+        if not isinstance(raw_layer, dict):
+            raise ValueError("Each AMR layer must be an object")
+        layer_number = int(raw_layer.get("layer") or layer_index)
+        raw_blocks = raw_layer.get("blocks") or []
+        if not isinstance(raw_blocks, list):
+            raise ValueError("AMR layer blocks must be a list")
+        lines.append(f"======================== AMR Layer {layer_number} ===========================================")
+        lines.append(str(len(raw_blocks)))
+        for raw_block in raw_blocks:
+            if not isinstance(raw_block, dict):
+                raise ValueError("Each AMR block must be an object")
+            start = raw_block.get("start")
+            end = raw_block.get("end")
+            if not isinstance(start, list) or not isinstance(end, list) or len(start) != 3 or len(end) != 3:
+                raise ValueError("AMR block start/end must be 3-value lists")
+            block_id = int(raw_block.get("id") or 0)
+            parent = int(raw_block.get("parent") or 0)
+            moving = int(raw_block.get("moving") or 0)
+            values = [float(item) for item in start + end]
+            lines.append(
+                f"{block_id}\t{parent}\t"
+                f"{_format_amr_number(values[0])} {_format_amr_number(values[1])} {_format_amr_number(values[2])}\t\t"
+                f"{_format_amr_number(values[3])} {_format_amr_number(values[4])} {_format_amr_number(values[5])}\t\t"
+                f"{moving}"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _format_amr_number(value: float) -> str:
+    return f"{float(value):.10g}"
 
 
 def _fort_report(case_dir: Path, fort_start: int = 41) -> dict[str, object]:

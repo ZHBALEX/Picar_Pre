@@ -4,6 +4,7 @@
   const INTERACTIVE_SURFACE_TRIANGLES = 12000;
   const MAX_GRID_LINES = 28;
   const DENSE_UNIFORM_RATIO = 1.05;
+  const AMR_COLORS = ["#d62828", "#2f80ed", "#f59f00", "#7b2cbf", "#2b9348", "#d9480f"];
   const MESH_INPUT_FIELDS = [
     ["scale_ref", "float"], ["Lx", "float"], ["Ly", "float"], ["Lz", "float"],
     ["x_center_dense", "float"], ["y_center_dense", "float"], ["z_center_dense", "float"],
@@ -46,6 +47,7 @@
     showSurfaceLines: document.getElementById("showSurfaceLines"),
     showMeshBounds: document.getElementById("showMeshBounds"),
     showDenseRegion: document.getElementById("showDenseRegion"),
+    showAmrRegions: document.getElementById("showAmrRegions"),
     showFullMesh: document.getElementById("showFullMesh"),
     showFortMotion: document.getElementById("showFortMotion"),
     showAxes: document.getElementById("showAxes"),
@@ -72,6 +74,9 @@
     previewMesh: document.getElementById("previewMesh"),
     saveMeshInput: document.getElementById("saveMeshInput"),
     generateMesh: document.getElementById("generateMesh"),
+    amrResize: document.getElementById("amrResize"),
+    amrList: document.getElementById("amrList"),
+    saveAmr: document.getElementById("saveAmr"),
     fortList: document.getElementById("fortList"),
     fortBody: document.getElementById("fortBody"),
     fortFrame: document.getElementById("fortFrame"),
@@ -85,6 +90,7 @@
   const state = {
     surface: null,
     mesh: { x: null, y: null, z: null, denseBox: null },
+    amr: null,
     fort: null,
     motion: null,
     loadedFiles: [],
@@ -132,6 +138,7 @@
       el.showSurfaceLines,
       el.showMeshBounds,
       el.showDenseRegion,
+      el.showAmrRegions,
       el.showFullMesh,
       el.showFortMotion,
       el.showAxes,
@@ -154,6 +161,8 @@
     el.previewMesh.addEventListener("click", previewMeshFromControls);
     el.saveMeshInput.addEventListener("click", saveMeshInput);
     el.generateMesh.addEventListener("click", generateMesh);
+    el.amrResize.addEventListener("change", updateAmrFromControls);
+    el.saveAmr.addEventListener("click", saveAmr);
     el.previewFort.addEventListener("click", previewFortMotion);
     el.clearFort.addEventListener("click", clearFortMotion);
     el.scaleRef.addEventListener("input", previewMeshFromControls);
@@ -176,6 +185,7 @@
 
       state.surface = null;
       state.mesh = { x: null, y: null, z: null, denseBox: null };
+      state.amr = null;
       state.fort = report.fort || null;
       state.motion = null;
       state.loadedFiles = [];
@@ -197,6 +207,10 @@
             })
             .catch(() => { state.mesh[axis] = null; }));
         });
+      }
+      if (report.amr && report.amr.ok) {
+        state.amr = normalizeAmr(report.amr);
+        addLoadedFile("amr", "amr_in.dat", "case AMR");
       }
       if (backendSupportsFort(report)) {
         loads.push(fetchJson(`/api/fort/report${loadedQuery}`)
@@ -234,6 +248,7 @@
     }
     renderLoadedFiles();
     renderBodyList();
+    renderAmrPanel();
     renderFortPanel();
     updateCommands();
   }
@@ -276,6 +291,10 @@
           const text = await file.text();
           state.mesh.z = parseGridAxis(text);
           addLoadedFile("z", file.name, "dropped grid");
+        } else if (lower === "amr_in.dat" || lower.includes("amr")) {
+          const text = await file.text();
+          state.amr = parseAmrText(text);
+          addLoadedFile("amr", file.name, "dropped AMR");
         }
       } catch (err) {
         setStatus(`Could not load ${file.name}: ${err.message || err}`);
@@ -291,6 +310,7 @@
     updateStats();
     renderLoadedFiles();
     renderBodyList();
+    renderAmrPanel();
   }
 
   async function loadSelectedMeshInput() {
@@ -339,6 +359,7 @@
     if (id === "x") state.mesh.x = null;
     if (id === "y") state.mesh.y = null;
     if (id === "z") state.mesh.z = null;
+    if (id === "amr") state.amr = null;
     if (id === "mesh-input") {
       fillMeshControls(defaultMeshParams());
       state.meshControlsReady = true;
@@ -352,6 +373,7 @@
     updateStats();
     renderLoadedFiles();
     renderBodyList();
+    renderAmrPanel();
     requestDraw();
   }
 
@@ -374,6 +396,91 @@
         </div>
       `;
     }).join("");
+  }
+
+  function renderAmrPanel() {
+    if (!el.amrList || !el.amrResize) return;
+    const amr = state.amr;
+    if (!amr || !amr.layers.length) {
+      el.amrResize.value = "0";
+      el.amrList.innerHTML = `<div class="item-row"><span class="item-meta">No amr_in.dat loaded</span></div>`;
+      return;
+    }
+    el.amrResize.value = String(amr.resize ?? 0);
+    el.amrList.innerHTML = amr.layers.map((layer, layerIndex) => {
+      const color = amrColor(layerIndex);
+      const blocks = layer.blocks.map((block, blockIndex) => `
+        <section class="axis-group" data-amr-block="${layerIndex}:${blockIndex}">
+          <h3>Block ${escapeHtml(block.id)}</h3>
+          <div class="grid three">
+            <label>ID<input data-amr-field="id" type="number" step="1" value="${formatControlNumber(block.id)}"></label>
+            <label>Parent<input data-amr-field="parent" type="number" step="1" value="${formatControlNumber(block.parent)}"></label>
+            <label>Moving<input data-amr-field="moving" type="number" min="0" step="1" value="${formatControlNumber(block.moving)}"></label>
+          </div>
+          <div class="grid three">
+            <label>Start X<input data-amr-field="start.0" type="number" step="0.01" value="${formatControlNumber(block.start[0])}"></label>
+            <label>Start Y<input data-amr-field="start.1" type="number" step="0.01" value="${formatControlNumber(block.start[1])}"></label>
+            <label>Start Z<input data-amr-field="start.2" type="number" step="0.01" value="${formatControlNumber(block.start[2])}"></label>
+          </div>
+          <div class="grid three">
+            <label>End X<input data-amr-field="end.0" type="number" step="0.01" value="${formatControlNumber(block.end[0])}"></label>
+            <label>End Y<input data-amr-field="end.1" type="number" step="0.01" value="${formatControlNumber(block.end[1])}"></label>
+            <label>End Z<input data-amr-field="end.2" type="number" step="0.01" value="${formatControlNumber(block.end[2])}"></label>
+          </div>
+        </section>
+      `).join("");
+      return `
+        <section class="amr-layer">
+          <h3><span class="amr-swatch" style="background:${color}"></span>Layer ${escapeHtml(layer.layer)}</h3>
+          ${blocks || `<div class="item-row"><span class="item-meta">No blocks</span></div>`}
+        </section>
+      `;
+    }).join("");
+    el.amrList.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", updateAmrFromControls);
+    });
+  }
+
+  function updateAmrFromControls() {
+    if (!state.amr) return;
+    state.amr.resize = Math.trunc(numValue(el.amrResize, 0));
+    el.amrList.querySelectorAll("[data-amr-block]").forEach((section) => {
+      const [layerIndex, blockIndex] = String(section.dataset.amrBlock || "").split(":").map((value) => Number(value));
+      const block = state.amr.layers[layerIndex] && state.amr.layers[layerIndex].blocks[blockIndex];
+      if (!block) return;
+      section.querySelectorAll("[data-amr-field]").forEach((input) => {
+        const field = input.dataset.amrField || "";
+        const value = field === "id" || field === "parent" || field === "moving"
+          ? Math.trunc(numValue(input, 0))
+          : numValue(input, 0);
+        if (field === "id") block.id = value;
+        else if (field === "parent") block.parent = value;
+        else if (field === "moving") block.moving = value;
+        else if (field.startsWith("start.")) block.start[Number(field.split(".")[1])] = value;
+        else if (field.startsWith("end.")) block.end[Number(field.split(".")[1])] = value;
+      });
+    });
+    recomputeBounds();
+    updateStats();
+    requestDraw();
+  }
+
+  async function saveAmr() {
+    if (!state.amr) {
+      setStatus("No AMR data to save.");
+      return;
+    }
+    try {
+      updateAmrFromControls();
+      const result = await postJson("/api/amr/save", { case_dir: el.caseDir.value.trim(), amr: state.amr });
+      state.amr = normalizeAmr(result.amr);
+      addLoadedFile("amr", "amr_in.dat", "case AMR");
+      renderLoadedFiles();
+      renderAmrPanel();
+      setStatus(`AMR saved: ${result.path || "amr_in.dat"}`);
+    } catch (err) {
+      setStatus(`Save AMR failed: ${err.message || err}`);
+    }
   }
 
   function renderFortPanel() {
@@ -1099,6 +1206,67 @@
     return Float64Array.from(values.filter(Number.isFinite));
   }
 
+  function parseAmrText(text) {
+    let resize = 0;
+    const layers = [];
+    let currentLayer = null;
+    let expectedBlocks = null;
+    text.split(/\r?\n/).forEach((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const numbers = Array.from(numericTokens(line));
+      if (line.includes("AMR_RESIZE") && numbers.length) {
+        resize = Math.trunc(numbers[0]);
+        return;
+      }
+      if (line.includes("AMR Layer")) {
+        currentLayer = { layer: numbers.length ? Math.trunc(numbers[numbers.length - 1]) : layers.length + 1, blocks: [] };
+        layers.push(currentLayer);
+        expectedBlocks = null;
+        return;
+      }
+      if (!currentLayer) return;
+      if (expectedBlocks === null && numbers.length === 1) {
+        expectedBlocks = Math.trunc(numbers[0]);
+        return;
+      }
+      if (numbers.length < 9) return;
+      currentLayer.blocks.push({
+        id: Math.trunc(numbers[0]),
+        parent: Math.trunc(numbers[1]),
+        start: [numbers[2], numbers[3], numbers[4]],
+        end: [numbers[5], numbers[6], numbers[7]],
+        moving: Math.trunc(numbers[8]),
+      });
+      if (expectedBlocks !== null && currentLayer.blocks.length >= expectedBlocks) expectedBlocks = null;
+    });
+    return normalizeAmr({ resize, layers });
+  }
+
+  function normalizeAmr(amr) {
+    const rawLayers = Array.isArray(amr && amr.layers) ? amr.layers : [];
+    return {
+      ok: amr && amr.ok !== false,
+      path: amr && amr.path ? String(amr.path) : "",
+      resize: Math.trunc(Number(amr && amr.resize) || 0),
+      layers: rawLayers.map((layer, layerIndex) => ({
+        layer: Math.trunc(Number(layer.layer) || layerIndex + 1),
+        blocks: Array.isArray(layer.blocks) ? layer.blocks.map((block) => ({
+          id: Math.trunc(Number(block.id) || 0),
+          parent: Math.trunc(Number(block.parent) || 0),
+          start: vector3(block.start),
+          end: vector3(block.end),
+          moving: Math.trunc(Number(block.moving) || 0),
+        })) : [],
+      })),
+    };
+  }
+
+  function vector3(value) {
+    const raw = Array.isArray(value) ? value : [];
+    return [Number(raw[0]) || 0, Number(raw[1]) || 0, Number(raw[2]) || 0];
+  }
+
   function previewStarts() {
     const surface = surfaceBounds();
     return {
@@ -1164,6 +1332,7 @@
     if (el.showAxes.checked) drawAxesAndTicks(ctx, rect);
     if (el.showMeshBounds.checked) drawMeshBounds(ctx, rect);
     if (el.showDenseRegion.checked) drawDenseRegion(ctx, rect);
+    if (el.showAmrRegions.checked) drawAmrRegions(ctx, rect);
     if (el.showFullMesh.checked) drawSampledGrid(ctx, rect);
     drawSurface(ctx, rect);
     drawFortMotion(ctx, rect);
@@ -1230,6 +1399,41 @@
     const box = { x0: dense.x0, x1: dense.x1, y0: dense.y0, y1: dense.y1, z0, z1 };
     drawBoxFaces(ctx, rect, box, "rgba(42, 132, 122, 0.18)");
     drawBoxEdges(ctx, rect, box, "#1a786f", 1.4);
+  }
+
+  function drawAmrRegions(ctx, rect) {
+    if (!state.amr || !state.amr.layers.length) return;
+    state.amr.layers.forEach((layer, layerIndex) => {
+      const color = amrColor(layerIndex);
+      layer.blocks.forEach((block) => {
+        const box = amrBlockBox(block);
+        drawBoxFaces(ctx, rect, box, amrFillColor(color));
+        drawBoxEdges(ctx, rect, box, color, 1.5);
+      });
+    });
+  }
+
+  function amrBlockBox(block) {
+    return {
+      x0: Math.min(block.start[0], block.end[0]),
+      x1: Math.max(block.start[0], block.end[0]),
+      y0: Math.min(block.start[1], block.end[1]),
+      y1: Math.max(block.start[1], block.end[1]),
+      z0: Math.min(block.start[2], block.end[2]),
+      z1: Math.max(block.start[2], block.end[2]),
+    };
+  }
+
+  function amrColor(index) {
+    return AMR_COLORS[index % AMR_COLORS.length];
+  }
+
+  function amrFillColor(color) {
+    const hex = color.replace("#", "");
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, 0.12)`;
   }
 
   function drawSampledGrid(ctx, rect) {
@@ -1533,6 +1737,15 @@
         for (let i = 0; i < frame.points.length; i += 3) add(frame.points[i], frame.points[i + 1], frame.points[i + 2]);
       });
     }
+    if (state.amr) {
+      state.amr.layers.forEach((layer) => {
+        layer.blocks.forEach((block) => {
+          const box = amrBlockBox(block);
+          add(box.x0, box.y0, box.z0);
+          add(box.x1, box.y1, box.z1);
+        });
+      });
+    }
     const box = meshDomainBox();
     if (box) {
       add(box.x0, box.y0, box.z0);
@@ -1755,6 +1968,10 @@
       lines.push(`mesh x/y/z    : ${state.mesh.x.length} / ${state.mesh.y.length} / ${state.mesh.z ? state.mesh.z.length : 0}`);
       lines.push(`dense region  : ${state.mesh.denseBox ? "available" : "not found in mesh input"}`);
     }
+    if (state.amr && state.amr.layers.length) {
+      const blockCount = state.amr.layers.reduce((sum, layer) => sum + layer.blocks.length, 0);
+      lines.push(`AMR layers    : ${state.amr.layers.length} layers, ${blockCount} blocks`);
+    }
     if (state.fort && state.fort.files && state.fort.files.length) {
       const okCount = state.fort.files.filter((item) => item.ok && item.node_match !== false).length;
       lines.push(`fort files    : ${okCount} / ${state.fort.files.length} matched`);
@@ -1799,6 +2016,7 @@
       const okCount = report.fort.files.filter((item) => item.ok && item.node_match !== false).length;
       lines.push(`fort files: ${okCount}/${report.fort.files.length} matched`);
     }
+    if (report.amr && report.amr.ok) lines.push(`AMR: ${report.amr.layers.length} layers, ${report.amr.block_count || 0} blocks`);
     lines.push(`dense region: ${report.mesh && report.mesh.dense_box ? "available" : "not found"}`);
     lines.push(`validation: ${report.validation.length ? "FAIL" : "PASS"}`);
     report.validation.forEach((item) => lines.push(`- ${item}`));

@@ -81,7 +81,7 @@ h2 {
 
 .mode-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -165,6 +165,28 @@ h2 {
   margin: 0;
   font-size: 13px;
   color: #25313d;
+}
+
+.amr-layer {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #dce3e8;
+}
+
+.amr-layer h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #25313d;
+}
+
+.amr-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: -1px;
 }
 
 .hint {
