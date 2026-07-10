@@ -46,6 +46,22 @@ case-oriented: surface points, mesh boundary, dense-region box, coordinate axes,
 and ticks. Optional layers can enable sampled full-grid lines and surface
 triangle overlays when you need more detail.
 
+### Visual Checks
+
+![Picar Console base visualization](baseVisual.png)
+
+The base visualization overlays the case surface, mesh domain, dense-region
+box, coordinate axes, and loaded grid files in the same scene. Use it as a quick
+sanity check before generating solver inputs: the body position, mesh bounds,
+and refinement region should all line up in one view.
+
+![Picar Console motion preview](MotionVisual.png)
+
+The `Fort` panel can preview prescribed-motion `fort.*` files on top of the
+surface geometry. Choose the body, frame, sample count, component order, and
+motion mode; gray snapshots show the sampled motion envelope, while the
+highlighted frame shows the selected motion state.
+
 Console panels:
 
 - `Setup`: load a case and control visualization layers.
@@ -54,8 +70,8 @@ Console panels:
 - `Mesh`: edit mesh-input parameters while the right-side scene updates live;
   use `Save Input` to write `input.dat`, then `Generate XYZ` to write
   `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
-- `Fort`: reserved for prescribed-motion tools after the geometry/mesh setup
-  workflow is stable.
+- `Fort`: inspect matched `fort.*` files and preview sampled prescribed motion
+  against the current surface.
 
 The toolkit currently focuses on the solid/body workflow:
 
