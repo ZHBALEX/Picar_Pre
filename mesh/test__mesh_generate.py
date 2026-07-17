@@ -4,7 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
+from case_editor.run_picar_console import _axis_params_from_grid
 from mesh.generation import generate_mesh
+from mesh.generation import make_axis_nodes
 from mesh.io import read_mesh, validate_mesh, write_mesh
 from mesh.optimization import optimize_mesh_params, preferred_count_near
 
@@ -60,6 +62,67 @@ def test_generate_mesh_is_monotone() -> None:
     assert mesh.counts == (21, 15, 11)
     assert np.isclose(mesh.x.values[0], 0.0)
     assert np.isclose(mesh.x.values[-1], 10.0)
+
+
+def test_axis_generation_matches_reference_two_layer_xgrid() -> None:
+    values = make_axis_nodes(
+        length=12.5,
+        center_dense=10.9,
+        dense_length=2.2656,
+        dense_count=192,
+        left_length_hint=0.0,
+        right_length_hint=0.0,
+        left_stretch_count=33,
+        left_uniform_count=0,
+        right_uniform_count=0,
+        right_stretch_count=31,
+        left_ratio=1.08,
+        right_ratio=1.08,
+    )
+
+    assert values.size == 257
+    assert np.allclose(
+        values[[0, 1, 33, 34, 100, 225, 240, 255, 256]],
+        [
+            0.0,
+            2.46658340422205,
+            9.7672,
+            9.779,
+            10.5578,
+            12.0328,
+            12.2206489125264,
+            12.4777838003295,
+            12.5,
+        ],
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert np.allclose(np.diff(values)[33:225], 0.0118, rtol=0.0, atol=1e-12)
+
+
+def test_console_infers_reference_two_layer_dense_region() -> None:
+    values = make_axis_nodes(
+        length=12.5,
+        center_dense=10.9,
+        dense_length=2.2656,
+        dense_count=192,
+        left_length_hint=0.0,
+        right_length_hint=0.0,
+        left_stretch_count=33,
+        left_uniform_count=0,
+        right_uniform_count=0,
+        right_stretch_count=31,
+        left_ratio=1.08,
+        right_ratio=1.08,
+    )
+
+    axis = _axis_params_from_grid(values)
+
+    assert np.isclose(axis["center"], 10.9)
+    assert np.isclose(axis["dense_length"], 2.2656)
+    assert axis["dense_count"] == 192
+    assert axis["left_stretch"] == 33
+    assert axis["right_stretch"] == 31
 
 
 def test_write_and_read_mesh(tmp_path: Path) -> None:

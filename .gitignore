@@ -3,3 +3,4 @@
 example/run_case/fort.*
 *.pyc
 /mesh/examples
+/mesh/test_outputs

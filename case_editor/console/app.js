@@ -1035,12 +1035,18 @@
   function makeAxisNodesFromControls(axis) {
     const cfg = readAxisControls(axis);
     if (cfg.end <= cfg.start) return Float64Array.from([cfg.start, cfg.end]);
+    const denseSizes = uniformSizes(Math.max(0, cfg.denseEnd - cfg.denseStart), cfg.denseCount);
+    const leftUniformSizes = uniformSizes(Math.max(0, cfg.leftLayerLength), cfg.leftUniform);
+    const rightUniformSizes = uniformSizes(Math.max(0, cfg.rightLayerLength), cfg.rightUniform);
+    const denseSpacing = denseSizes.length ? denseSizes[0] : 0;
+    const leftAdjacent = leftUniformSizes.length ? leftUniformSizes[0] : denseSpacing;
+    const rightAdjacent = rightUniformSizes.length ? rightUniformSizes[0] : denseSpacing;
     const sizes = [
-      ...geometricSizes(Math.max(0, cfg.denseStart - cfg.start - cfg.leftLayerLength), cfg.leftStretch, cfg.ratio).reverse(),
-      ...geometricSizes(Math.max(0, cfg.leftLayerLength), cfg.leftUniform, 1),
-      ...geometricSizes(Math.max(0, cfg.denseEnd - cfg.denseStart), cfg.denseCount, 1),
-      ...geometricSizes(Math.max(0, cfg.rightLayerLength), cfg.rightUniform, 1),
-      ...geometricSizes(Math.max(0, cfg.end - cfg.denseEnd - cfg.rightLayerLength), cfg.rightStretch, cfg.ratio),
+      ...smoothStretchSizes(Math.max(0, cfg.denseStart - cfg.start - cfg.leftLayerLength), cfg.leftStretch, leftAdjacent, "left"),
+      ...leftUniformSizes,
+      ...denseSizes,
+      ...rightUniformSizes,
+      ...smoothStretchSizes(Math.max(0, cfg.end - cfg.denseEnd - cfg.rightLayerLength), cfg.rightStretch, rightAdjacent, "right"),
     ];
     const nodes = [cfg.start];
     sizes.forEach((size) => nodes.push(nodes[nodes.length - 1] + size));
@@ -1049,11 +1055,36 @@
     return Float64Array.from(nodes);
   }
 
-  function geometricSizes(length, count, ratio) {
+  function uniformSizes(length, count) {
     if (count <= 0 || length <= 0) return [];
-    if (Math.abs(ratio - 1) < 1e-12) return Array(count).fill(length / count);
-    const first = length * (1 - ratio) / (1 - ratio ** count);
-    return Array.from({ length: count }, (_, i) => first * ratio ** i);
+    return Array(count).fill(length / count);
+  }
+
+  function smoothStretchSizes(length, count, adjacentSize, side) {
+    if (count <= 0 || length <= 0) return [];
+    if (adjacentSize <= 0 || length <= adjacentSize * count) return uniformSizes(length, count);
+    const makeSizes = (growth) => {
+      const sizes = [];
+      let previous = adjacentSize;
+      for (let i = 1; i <= count; i += 1) {
+        previous = side === "left"
+          ? previous / (1 - i * growth)
+          : previous * (1 + i * growth);
+        sizes.push(previous);
+      }
+      return sizes;
+    };
+    let lo = 0;
+    let hi = side === "left" ? (1 - 1e-14) / count : 1;
+    const sum = (items) => items.reduce((acc, value) => acc + value, 0);
+    while (side === "right" && sum(makeSizes(hi)) < length) hi *= 2;
+    for (let iter = 0; iter < 100; iter += 1) {
+      const mid = 0.5 * (lo + hi);
+      if (sum(makeSizes(mid)) < length) lo = mid;
+      else hi = mid;
+    }
+    const sizes = makeSizes(0.5 * (lo + hi));
+    return side === "left" ? sizes.reverse() : sizes;
   }
 
   async function saveMeshInput() {
@@ -1799,7 +1830,7 @@
     const minSpacing = Math.min(...spacing);
     const maxSpacing = Math.max(...spacing);
     if (maxSpacing / minSpacing <= DENSE_UNIFORM_RATIO) return [values[0], values[values.length - 1]];
-    const threshold = minSpacing * 1.08;
+    const threshold = minSpacing + Math.max(Math.abs(minSpacing) * 1e-6, 1e-12);
     let bestStart = 0;
     let bestEnd = 0;
     let start = -1;

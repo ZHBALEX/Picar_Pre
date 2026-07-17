@@ -636,7 +636,7 @@ def _axis_params_from_grid(values) -> dict[str, float | int]:
             "right_stretch": 0,
         }
 
-    threshold = min_spacing * 1.08
+    threshold = min_spacing + max(abs(min_spacing) * 1e-6, 1e-12)
     best_start = 0
     best_end = 0
     run_start = -1

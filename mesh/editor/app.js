@@ -327,12 +327,18 @@
     const rightUniformLength = Math.min(cfg.rightLayerLength, Math.max(0, rightTotal));
     const leftStretchLength = Math.max(0, leftTotal - leftUniformLength);
     const rightStretchLength = Math.max(0, rightTotal - rightUniformLength);
+    const denseSizes = uniformSizes(cfg.denseEnd - cfg.denseStart, cfg.denseCount);
+    const leftUniformSizes = uniformSizes(leftUniformLength, cfg.leftUniform);
+    const rightUniformSizes = uniformSizes(rightUniformLength, cfg.rightUniform);
+    const denseSpacing = denseSizes.length ? denseSizes[0] : 0;
+    const leftAdjacent = leftUniformSizes.length ? leftUniformSizes[0] : denseSpacing;
+    const rightAdjacent = rightUniformSizes.length ? rightUniformSizes[0] : denseSpacing;
     const sizes = [
-      ...geometricSizes(leftStretchLength, cfg.leftStretch, effectiveRatio(cfg.leftRatio)).reverse(),
-      ...geometricSizes(leftUniformLength, cfg.leftUniform, 1),
-      ...geometricSizes(cfg.denseEnd - cfg.denseStart, cfg.denseCount, 1),
-      ...geometricSizes(rightUniformLength, cfg.rightUniform, 1),
-      ...geometricSizes(rightStretchLength, cfg.rightStretch, effectiveRatio(cfg.rightRatio)),
+      ...smoothStretchSizes(leftStretchLength, cfg.leftStretch, leftAdjacent, "left"),
+      ...leftUniformSizes,
+      ...denseSizes,
+      ...rightUniformSizes,
+      ...smoothStretchSizes(rightStretchLength, cfg.rightStretch, rightAdjacent, "right"),
     ];
     const nodes = [cfg.start];
     sizes.forEach((size) => nodes.push(nodes[nodes.length - 1] + size));
@@ -340,11 +346,36 @@
     return nodes;
   }
 
-  function geometricSizes(length, count, ratio) {
+  function uniformSizes(length, count) {
     if (count <= 0 || length <= 0) return [];
-    if (Math.abs(ratio - 1) < 1e-12) return Array(count).fill(length / count);
-    const first = length * (1 - ratio) / (1 - ratio ** count);
-    return Array.from({ length: count }, (_, i) => first * ratio ** i);
+    return Array(count).fill(length / count);
+  }
+
+  function smoothStretchSizes(length, count, adjacentSize, side) {
+    if (count <= 0 || length <= 0) return [];
+    if (adjacentSize <= 0 || length <= adjacentSize * count) return uniformSizes(length, count);
+    const makeSizes = (growth) => {
+      const sizes = [];
+      let previous = adjacentSize;
+      for (let i = 1; i <= count; i += 1) {
+        previous = side === "left"
+          ? previous / (1 - i * growth)
+          : previous * (1 + i * growth);
+        sizes.push(previous);
+      }
+      return sizes;
+    };
+    let lo = 0;
+    let hi = side === "left" ? (1 - 1e-14) / count : 1;
+    const sum = (items) => items.reduce((acc, value) => acc + value, 0);
+    while (side === "right" && sum(makeSizes(hi)) < length) hi *= 2;
+    for (let iter = 0; iter < 100; iter += 1) {
+      const mid = 0.5 * (lo + hi);
+      if (sum(makeSizes(mid)) < length) lo = mid;
+      else hi = mid;
+    }
+    const sizes = makeSizes(0.5 * (lo + hi));
+    return side === "left" ? sizes.reverse() : sizes;
   }
 
   function formatInput(params) {
@@ -452,10 +483,6 @@
 
   function denseChangeAllowed(oldLength, newLength, maxChange) {
     return Math.abs(newLength - oldLength) <= Math.abs(oldLength) * maxChange + 1e-12;
-  }
-
-  function effectiveRatio(ratio) {
-    return ratio >= 1 ? ratio : 1 / ratio;
   }
 
   function midpointRelative(cfg) {

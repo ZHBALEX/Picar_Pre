@@ -79,16 +79,23 @@ def make_axis_nodes(
         "right",
     )
 
-    left_ratio = _effective_ratio(left_ratio)
-    right_ratio = _effective_ratio(right_ratio)
+    _effective_ratio(left_ratio)
+    _effective_ratio(right_ratio)
+
+    dense_sizes = geometric_sizes(x1 - x0, dense_count, 1.0)
+    left_uniform_sizes = geometric_sizes(left_uniform_length, left_uniform_count, 1.0)
+    right_uniform_sizes = geometric_sizes(right_uniform_length, right_uniform_count, 1.0)
+    dense_spacing = float(dense_sizes[0]) if dense_sizes.size else 0.0
+    left_adjacent_spacing = float(left_uniform_sizes[0]) if left_uniform_sizes.size else dense_spacing
+    right_adjacent_spacing = float(right_uniform_sizes[0]) if right_uniform_sizes.size else dense_spacing
 
     sizes = np.concatenate(
         [
-            geometric_sizes(left_stretch_length, left_stretch_count, left_ratio)[::-1],
-            geometric_sizes(left_uniform_length, left_uniform_count, 1.0),
-            geometric_sizes(x1 - x0, dense_count, 1.0),
-            geometric_sizes(right_uniform_length, right_uniform_count, 1.0),
-            geometric_sizes(right_stretch_length, right_stretch_count, right_ratio),
+            smooth_stretch_sizes(left_stretch_length, left_stretch_count, left_adjacent_spacing, side="left"),
+            left_uniform_sizes,
+            dense_sizes,
+            right_uniform_sizes,
+            smooth_stretch_sizes(right_stretch_length, right_stretch_count, right_adjacent_spacing, side="right"),
         ]
     )
 
@@ -229,6 +236,68 @@ def _split_layer_lengths(
     else:
         uniform_length = uniform_length_hint
     return uniform_length, total_length - uniform_length
+
+
+def smooth_stretch_sizes(length: float, count: int, adjacent_size: float, side: str) -> np.ndarray:
+    """Return PICAR-style stretched interval sizes.
+
+    The original two-layer mesh generator grows intervals outward from the
+    uniform near-body spacing, solving the growth strength so the stretched
+    layer closes exactly at the outer boundary.
+    """
+    length = float(length)
+    count = int(count)
+    adjacent_size = float(adjacent_size)
+    if count <= 0 or length <= 0.0:
+        return np.asarray([], dtype=float)
+    if adjacent_size <= 0.0 or length <= adjacent_size * count:
+        return np.full(count, length / count, dtype=float)
+
+    if side == "left":
+        hi = (1.0 - 1e-14) / count
+
+        def make_sizes(growth: float) -> np.ndarray:
+            sizes: list[float] = []
+            previous = adjacent_size
+            for idx in range(1, count + 1):
+                previous = previous / (1.0 - idx * growth)
+                sizes.append(previous)
+            return np.asarray(sizes, dtype=float)
+
+        near_to_far = make_sizes(_bisect_growth(length, make_sizes, 0.0, hi))
+        return near_to_far[::-1]
+
+    if side == "right":
+
+        def make_sizes(growth: float) -> np.ndarray:
+            sizes: list[float] = []
+            previous = adjacent_size
+            for idx in range(1, count + 1):
+                previous = previous * (1.0 + idx * growth)
+                sizes.append(previous)
+            return np.asarray(sizes, dtype=float)
+
+        hi = 1.0
+        while float(np.sum(make_sizes(hi))) < length:
+            hi *= 2.0
+        return make_sizes(_bisect_growth(length, make_sizes, 0.0, hi))
+
+    raise ValueError("side must be 'left' or 'right'")
+
+
+def _bisect_growth(
+    target_length: float,
+    make_sizes,
+    lo: float,
+    hi: float,
+) -> float:
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        if float(np.sum(make_sizes(mid))) < target_length:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 def _effective_ratio(ratio: float) -> float:
