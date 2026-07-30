@@ -33,6 +33,13 @@ for generating and checking:
 - `run_case_editor.py`
   Command-line interface for the case workflow.
 
+- `data_facts.py`
+  Solver-independent facts scanned from grid, surface, and `fort.*` data files.
+
+- `control/`
+  Versioned setup profiles and dry-run/apply sync plans. The first profile is
+  `picar-current`.
+
 ## Command-Line Workflow
 
 Run commands from the repository root.
@@ -180,6 +187,25 @@ python case_editor/run_case_editor.py --case-dir case_editor/test_case input --u
 ```powershell
 python case_editor/run_case_editor.py --case-dir case_editor/test_case validate
 ```
+
+### 7. Sync Control Files from Data
+
+Inspect the proposed control changes first:
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/test_case sync --dry-run
+```
+
+Apply the plan when its status is `READY`:
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/test_case sync
+```
+
+The sync engine updates only values that can be proved from data files. It does
+not infer solid/membrane classification, body motion intent, or solver `dt`.
+Errors such as a surface/canonical body-count mismatch or a fort/surface node
+count mismatch block the whole write.
 
 A valid case prints:
 

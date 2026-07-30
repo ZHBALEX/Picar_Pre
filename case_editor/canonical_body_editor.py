@@ -109,7 +109,7 @@ def write_canonical_body(path: str | Path, config: CanonicalBodyConfig) -> Path:
 
 def read_canonical_body(path: str | Path) -> CanonicalBodyConfig:
     """Read the minimal body counts from canonical_body_in.dat."""
-    lines = [line.strip() for line in Path(path).read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+    lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
     if len(lines) < 3:
         raise ValueError(f"Invalid canonical body file: {path}")
 
@@ -122,22 +122,19 @@ def read_canonical_body(path: str | Path) -> CanonicalBodyConfig:
     thickness = lines[2].split()
 
     bodies: list[CanonicalBody] = []
-    idx = 3
-    while idx < len(lines) and len(bodies) < nbody:
-        if lines[idx].startswith("_"):
-            motion = lines[idx + 1].split()
-            counts = lines[idx + 2].split()
-            bodies.append(
-                CanonicalBody(
-                    motion_type=int(motion[0]),
-                    zone_max=int(motion[1]),
-                    nodes=int(counts[0]),
-                    elems=int(counts[1]),
-                )
+    for separator_idx, motion_idx, count_idx in _body_record_line_indices(lines):
+        if len(bodies) >= nbody:
+            break
+        motion = lines[motion_idx].split()
+        counts = lines[count_idx].split()
+        bodies.append(
+            CanonicalBody(
+                motion_type=int(float(motion[0])),
+                zone_max=int(float(motion[1])),
+                nodes=int(float(counts[0])),
+                elems=int(float(counts[1])),
             )
-            idx += 3
-        else:
-            idx += 1
+        )
 
     if len(bodies) != nbody:
         raise ValueError(f"Expected {nbody} body records, found {len(bodies)}")
@@ -172,3 +169,39 @@ def canonical_summary(config: CanonicalBodyConfig) -> str:
 
 def _bool_flag(value: bool) -> str:
     return "T" if value else "F"
+
+
+def _body_record_line_indices(lines: list[str]) -> list[tuple[int, int, int]]:
+    indices: list[tuple[int, int, int]] = []
+    idx = 3
+    while idx < len(lines):
+        stripped = lines[idx].strip()
+        if not stripped:
+            if indices:
+                break
+            idx += 1
+            continue
+        if not stripped.startswith("_"):
+            if indices:
+                break
+            idx += 1
+            continue
+        if idx + 2 >= len(lines):
+            break
+        if not (_line_starts_with_numbers(lines[idx + 1], 2) and _line_starts_with_numbers(lines[idx + 2], 2)):
+            break
+        indices.append((idx, idx + 1, idx + 2))
+        idx += 3
+    return indices
+
+
+def _line_starts_with_numbers(line: str, count: int) -> bool:
+    tokens = line.split("!", 1)[0].split()
+    if len(tokens) < count:
+        return False
+    try:
+        for token in tokens[:count]:
+            float(token.replace("D", "E").replace("d", "e"))
+    except ValueError:
+        return False
+    return True

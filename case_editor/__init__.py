@@ -2,6 +2,8 @@
 
 from .canonical_body_editor import CanonicalBody, CanonicalBodyConfig, canonical_from_surface, read_canonical_body, write_canonical_body
 from .case_project import CaseProject
+from .control import SyncChange, SyncIssue, SyncPlan, get_control_profile
+from .data_facts import CaseFacts, FortFileFacts, GridAxisFacts, SurfaceBodyFacts, scan_case_data
 from .input_editor import InputDatEditor
 from .mesh_editor import GridAxis, MeshConfig, generate_uniform_grids, read_grid_axis, read_mesh, write_grid_axis, write_mesh
 from .workflow import (
@@ -19,20 +21,29 @@ __all__ = [
     "CanonicalBuildConfig",
     "CanonicalBodyConfig",
     "CaseBuildConfig",
+    "CaseFacts",
     "CaseProject",
+    "FortFileFacts",
     "GridAxis",
+    "GridAxisFacts",
     "InputBuildConfig",
     "InputDatEditor",
     "MeshBuildConfig",
     "MeshConfig",
     "SurfaceBuildConfig",
+    "SurfaceBodyFacts",
+    "SyncChange",
+    "SyncIssue",
+    "SyncPlan",
     "build_2d_cylinder_case",
     "build_case",
     "canonical_from_surface",
     "generate_uniform_grids",
+    "get_control_profile",
     "read_canonical_body",
     "read_grid_axis",
     "read_mesh",
+    "scan_case_data",
     "write_canonical_body",
     "write_grid_axis",
     "write_mesh",

@@ -224,13 +224,10 @@ def format_mesh_input(params: dict[str, object]) -> str:
 def read_grid_axis(path: str | Path, name: str | None = None) -> MeshAxis:
     """Read a one-column or index/value grid coordinate file."""
     path = Path(path)
-    arr = np.loadtxt(path, ndmin=1)
-    if arr.ndim == 2:
-        if arr.shape[1] < 1:
-            raise ValueError(f"Empty grid file: {path}")
-        values = arr[:, 1] if arr.shape[1] >= 2 else arr[:, 0]
-    else:
-        values = arr
+    arr = np.loadtxt(path, ndmin=2)
+    if arr.shape[1] < 1:
+        raise ValueError(f"Empty grid file: {path}")
+    values = arr[:, 1] if arr.shape[1] >= 2 else arr[:, 0]
     values = np.asarray(values, dtype=float).reshape(-1)
     if values.size < 1:
         raise ValueError(f"Empty grid file: {path}")

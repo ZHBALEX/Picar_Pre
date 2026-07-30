@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     canon.add_argument("--motion-type", type=int, default=3)
     canon.add_argument("--zone-max", type=int, default=1)
 
+    sync = sub.add_parser("sync", help="Run Setup Sync from grid, surface, and fort data files.")
+    sync.add_argument("--profile", default="picar-current", help="Solver setup profile. Default: picar-current.")
+    sync.add_argument("--fort-start", type=int, default=41, help="fort number mapped to body 1. Default: 41.")
+    sync.add_argument("--dry-run", action="store_true", help="Print the setup sync plan without writing files.")
+
     sub.add_parser("report", help="Print full case report and validation.")
     sub.add_parser("validate", help="Validate case consistency.")
 
@@ -97,6 +102,16 @@ def main() -> None:
             zone_max=args.zone_max,
         )
         print(project.report())
+
+    elif args.command == "sync":
+        plan = project.sync_control_files(
+            profile=args.profile,
+            fort_start=args.fort_start,
+            dry_run=args.dry_run,
+        )
+        print(plan.format_report())
+        if plan.has_errors:
+            raise SystemExit(1)
 
     elif args.command == "report":
         print(project.report())

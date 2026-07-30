@@ -324,6 +324,28 @@ python case_editor/run_case_editor.py --case-dir case_editor/demo_case validate
 python case_editor/run_case_editor.py --case-dir case_editor/demo_case report
 ```
 
+### 7. Setup Sync from data files
+
+Preview changes without writing:
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case sync --dry-run
+```
+
+Apply a ready plan:
+
+```powershell
+python case_editor/run_case_editor.py --case-dir case_editor/demo_case sync
+```
+
+The `picar-current` setup profile treats grid, surface, and prescribed-motion
+files as data sources. It synchronizes grid counts/ranges/uniform flags,
+internal-boundary presence, and canonical body node/element counts. Physical
+intent such as solid versus membrane, motion type, and solver time step is not
+guessed. Body-count or fort-node mismatches block all writes; fort time-step
+differences are reported as validate-only warnings. For 2D cases without
+`zgrid.dat`, the existing `nz` and `zout` controls are preserved.
+
 ## Surface Tools
 
 Inspect a surface and verify read/write consistency:

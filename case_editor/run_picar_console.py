@@ -28,7 +28,7 @@ from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup25"
+CONSOLE_API_VERSION = "setup26"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -85,6 +85,9 @@ def make_handler(default_case_dir: Path):
                         "origin_shift": True,
                         "geometry_transform": True,
                         "fort_preview": True,
+                        "control_sync": True,
+                        "input_sync": True,
+                        "setup_sync": True,
                     })
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
@@ -185,6 +188,10 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         out = case_dir / "amr_in.dat"
         out.write_text(_format_amr_payload(amr), encoding="utf-8")
         return {"ok": True, "path": str(out), "amr": _amr_payload(case_dir)}
+    if path in {"/api/setup-sync/plan", "/api/input-sync/plan", "/api/control-sync/plan"}:
+        return _setup_sync_payload(case_dir, payload, apply=False)
+    if path in {"/api/setup-sync/apply", "/api/input-sync/apply", "/api/control-sync/apply"}:
+        return _setup_sync_payload(case_dir, payload, apply=True)
     if path == "/api/geometry/save-surface":
         content = str(payload.get("content") or "")
         out = case_dir / str(payload.get("surface_name") or "unstruc_surface_in.dat")
@@ -369,6 +376,47 @@ def _amr_payload(case_dir: Path) -> dict[str, object]:
     payload["path"] = str(path)
     payload["block_count"] = sum(len(layer["blocks"]) for layer in payload["layers"])
     return payload
+
+
+def _setup_sync_payload(case_dir: Path, payload: dict[str, object], apply: bool) -> dict[str, object]:
+    profile = str(payload.get("profile") or "picar-current")
+    fort_start = int(payload.get("fort_start") or 41)
+    project = CaseProject(case_dir)
+    plan = project.sync_control_files(profile=profile, fort_start=fort_start, dry_run=not apply)
+    return {
+        "ok": True,
+        "applied": bool(apply and not plan.has_errors),
+        "blocked": plan.has_errors,
+        "plan": _sync_plan_payload(plan),
+        "report": plan.format_report(),
+    }
+
+
+def _sync_plan_payload(plan) -> dict[str, object]:
+    return {
+        "case_dir": str(plan.case_dir),
+        "profile": plan.profile,
+        "changes": [
+            {
+                "control_file": change.control_file,
+                "field": change.field,
+                "current": _json_ready(change.current),
+                "desired": _json_ready(change.desired),
+                "source": change.source,
+                "mode": change.mode,
+            }
+            for change in plan.changes
+        ],
+        "issues": [
+            {
+                "severity": issue.severity,
+                "message": issue.message,
+            }
+            for issue in plan.issues
+        ],
+        "written_files": [str(path) for path in plan.written_files],
+        "has_errors": plan.has_errors,
+    }
 
 
 def _parse_amr_text(text: str) -> dict[str, object]:
@@ -780,6 +828,8 @@ def _mesh_input_paths(case_dir: Path) -> list[Path]:
 def _json_ready(value):
     if hasattr(value, "tolist"):
         return value.tolist()
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, dict):
         return {key: _json_ready(item) for key, item in value.items()}
     if isinstance(value, list):

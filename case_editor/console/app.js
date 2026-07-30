@@ -81,6 +81,11 @@
     amrResize: document.getElementById("amrResize"),
     amrList: document.getElementById("amrList"),
     saveAmr: document.getElementById("saveAmr"),
+    syncProfile: document.getElementById("syncProfile"),
+    syncFortStart: document.getElementById("syncFortStart"),
+    previewSetupSync: document.getElementById("previewSetupSync"),
+    applySetupSync: document.getElementById("applySetupSync"),
+    setupSyncReport: document.getElementById("setupSyncReport"),
     fortList: document.getElementById("fortList"),
     fortBody: document.getElementById("fortBody"),
     fortFrame: document.getElementById("fortFrame"),
@@ -173,6 +178,8 @@
     el.generateMesh.addEventListener("click", generateMesh);
     el.amrResize.addEventListener("change", updateAmrFromControls);
     el.saveAmr.addEventListener("click", saveAmr);
+    el.previewSetupSync.addEventListener("click", previewSetupSync);
+    el.applySetupSync.addEventListener("click", applySetupSync);
     el.previewFort.addEventListener("click", previewFortMotion);
     el.clearFort.addEventListener("click", clearFortMotion);
     el.scaleRef.addEventListener("input", previewMeshFromControls);
@@ -520,6 +527,50 @@
     }
   }
 
+  async function previewSetupSync() {
+    try {
+      await requireSetupSyncApi();
+      const result = await postJson("/api/setup-sync/plan", setupSyncPayload());
+      showSetupSyncResult(result);
+    } catch (err) {
+      showSetupSyncError(`Setup sync preview failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  async function applySetupSync() {
+    try {
+      await requireSetupSyncApi();
+      const result = await postJson("/api/setup-sync/apply", setupSyncPayload());
+      showSetupSyncResult(result);
+      if (result.applied) {
+        await loadCase();
+        showSetupSyncResult(result);
+      }
+    } catch (err) {
+      showSetupSyncError(`Setup sync failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  function setupSyncPayload() {
+    return {
+      case_dir: el.caseDir.value.trim(),
+      profile: el.syncProfile.value || "picar-current",
+      fort_start: Math.max(1, Math.trunc(numValue(el.syncFortStart, 41))),
+    };
+  }
+
+  function showSetupSyncResult(result) {
+    const report = result.report || "No sync report returned.";
+    if (el.setupSyncReport) el.setupSyncReport.textContent = report;
+    const action = result.applied ? "Setup synchronized." : (result.blocked ? "Setup sync blocked." : "Setup sync ready.");
+    setStatus(`${action}\n\n${report}`);
+  }
+
+  function showSetupSyncError(message) {
+    if (el.setupSyncReport) el.setupSyncReport.textContent = message;
+    setStatus(message);
+  }
+
   function renderFortPanel() {
     if (!el.fortList || !el.fortBody) return;
     const fort = state.fort || { body_count: state.surface ? state.surface.bodies.length : 0, files: [] };
@@ -657,6 +708,13 @@
     const health = await fetchJson("/api/health");
     if (!health.fort_preview) {
       throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before previewing fort motion.");
+    }
+  }
+
+  async function requireSetupSyncApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.setup_sync) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before syncing setup.");
     }
   }
 
@@ -2210,6 +2268,8 @@
     const caseDir = el.caseDir.value || "path/to/case";
     el.commands.textContent = [
       `python case_editor/run_case_editor.py --case-dir "${caseDir}" report`,
+      `python case_editor/run_case_editor.py --case-dir "${caseDir}" sync --dry-run`,
+      `python case_editor/run_case_editor.py --case-dir "${caseDir}" sync`,
       `python -m mesh.run_mesh_tools --case-dir "${caseDir}" inspect`,
       `python geometry/unstructure_surface/run_surface_tools.py --case-dir "${caseDir}" inspect --roundtrip`,
     ].join("\n\n");

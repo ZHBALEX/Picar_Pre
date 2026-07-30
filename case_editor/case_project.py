@@ -8,6 +8,8 @@ from geometry.unstructure_surface.project import SurfaceProject
 from geometry.unstructure_surface.surface import read_surface, validate_surface
 
 from .canonical_body_editor import canonical_from_surface, canonical_summary, read_canonical_body, write_canonical_body
+from .control import SyncPlan, get_control_profile
+from .data_facts import CaseFacts, scan_case_data
 from .input_editor import InputDatEditor
 from .mesh_editor import generate_uniform_grids, mesh_summary, read_mesh, write_mesh
 
@@ -56,6 +58,32 @@ class CaseProject:
 
     def input_editor(self) -> InputDatEditor:
         return InputDatEditor.load(self.input_path)
+
+    def scan_data(self, fort_start: int = 41) -> CaseFacts:
+        """Inspect grid, surface, and prescribed-motion data without writing files."""
+        return scan_case_data(self.case_dir, fort_start=fort_start)
+
+    def plan_control_sync(self, profile: str = "picar-current", fort_start: int = 41) -> SyncPlan:
+        """Build a setup sync plan from the current data files."""
+        facts = self.scan_data(fort_start=fort_start)
+        return get_control_profile(profile).plan(self.case_dir, facts)
+
+    def sync_control_files(
+        self,
+        profile: str = "picar-current",
+        fort_start: int = 41,
+        dry_run: bool = False,
+    ) -> SyncPlan:
+        """Synchronize provable setup fields from data files.
+
+        Plans with errors are returned without writing. Physical intent such as
+        body kind and motion type remains owned by the control file.
+        """
+        control_profile = get_control_profile(profile)
+        plan = control_profile.plan(self.case_dir, self.scan_data(fort_start=fort_start))
+        if not dry_run and not plan.has_errors:
+            control_profile.apply(plan)
+        return plan
 
     def generate_mesh(self, nx: int, ny: int, nz: int, xout: float, yout: float, zout: float, update_input: bool = True) -> None:
         mesh = generate_uniform_grids(nx, ny, nz, xout, yout, zout)

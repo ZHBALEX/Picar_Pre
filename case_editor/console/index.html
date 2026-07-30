@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup38">
+  <link rel="stylesheet" href="style.css?v=setup41">
 </head>
 <body>
   <main class="shell">
@@ -47,6 +47,18 @@
           <label><input id="showFortMotion" type="checkbox" checked> fort motion</label>
           <label><input id="showAxes" type="checkbox" checked> axes and ticks</label>
         </div>
+        <h2>Setup Sync</h2>
+        <div class="grid two">
+          <label>Profile<select id="syncProfile">
+            <option value="picar-current">picar-current</option>
+          </select></label>
+          <label>Fort start<input id="syncFortStart" type="number" min="1" step="1" value="41"></label>
+        </div>
+        <div class="actions">
+          <button id="previewSetupSync" type="button">Preview Setup Sync</button>
+          <button id="applySetupSync" type="button">Sync Setup</button>
+        </div>
+        <pre id="setupSyncReport" class="panel-report"></pre>
       </section>
       <section id="geometryPanel" class="control-panel">
         <h2>Geometry</h2>
@@ -170,6 +182,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup38"></script>
+  <script src="app.js?v=setup41"></script>
 </body>
 </html>
