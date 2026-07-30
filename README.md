@@ -43,19 +43,26 @@ python -B picar_console.py example/generated_circle2d_case
 The console shows `unstruc_surface_in.dat` and
 `xgrid.dat`/`ygrid.dat`/`zgrid.dat` together. The default view is fast and
 case-oriented: surface points, mesh boundary, dense-region box, coordinate axes,
-and ticks. Optional layers can enable sampled full-grid lines and surface
-triangle overlays when you need more detail.
+and ticks. If `probe_in.dat` exists, the console also enables a probe layer that
+draws resolved marker probes and fluid probe coordinates. Optional layers can
+enable sampled full-grid lines and surface triangle overlays when you need more
+detail.
 
 ### Visual Checks
 
-![Picar Console base visualization](baseVisual.png)
+![Picar Console base visualization](example/images/baseVisual.png)
+<sub>Picar Console base visualization</sub>
+
+| Preview | Preview |
+| --- | --- |
+| ![Picar Console motion preview](example/images/MotionVisual.png)<br><sub>Picar Console motion preview</sub> | ![Body 1 prescribed-motion envelope](example/images/body1_motion.png)<br><sub>Body 1 prescribed-motion envelope</sub> |
+| ![Body 2 prescribed-motion envelope](example/images/body2_motion.png)<br><sub>Body 2 prescribed-motion envelope</sub> | ![Mesh input preview](example/images/input_preview.png)<br><sub>Mesh input preview</sub> |
+| ![2D case probe preview in XY](example/images/run_case_2D_probe_xy.png)<br><sub>2D case probe preview in XY</sub> | ![Run-case probe preview in XZ](example/images/run_case_probe_xz.png)<br><sub>Run-case probe preview in XZ</sub> |
 
 The base visualization overlays the case surface, mesh domain, dense-region
 box, coordinate axes, and loaded grid files in the same scene. Use it as a quick
 sanity check before generating solver inputs: the body position, mesh bounds,
 and refinement region should all line up in one view.
-
-![Picar Console motion preview](MotionVisual.png)
 
 The `Fort` panel can preview prescribed-motion `fort.*` files on top of the
 surface geometry. Choose the body, frame, sample count, component order, and
@@ -81,6 +88,7 @@ The toolkit currently focuses on the solid/body workflow:
 - generate and inspect `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`
 - edit common `input.dat` values without rewriting the whole file format
 - inspect, rotate, visualize, and analyze large prescribed-motion `fort.*` files
+- inspect marker/fluid probes from `probe_in.dat` in the console scene
 - validate a complete case directory
 
 ## Repository Layout
@@ -147,6 +155,14 @@ Large prescribed-motion files. These live in a separate `motion/` workflow
 because they can be hundreds of MB and should not be rewritten during ordinary
 surface edits. Translation of a static surface does not require motion edits,
 but rotation should rotate the stored motion vectors too.
+
+### `probe_in.dat`
+
+Optional solver probe input. The console detects this file when loading a case
+and draws marker probes as body-surface locations plus fluid probes as direct
+coordinate points. Marker probes are resolved through
+[case_editor/probe.py](case_editor/probe.py), which keeps the file-format logic
+outside the browser console code.
 
 ## Quick Start
 

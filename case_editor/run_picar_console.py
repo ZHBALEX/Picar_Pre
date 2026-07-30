@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from case_editor.case_project import CaseProject  # noqa: E402
+from case_editor.probe import read_probe_payload  # noqa: E402
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
 from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
@@ -27,7 +28,7 @@ from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup23"
+CONSOLE_API_VERSION = "setup25"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -93,6 +94,9 @@ def make_handler(default_case_dir: Path):
                 elif path == "/api/amr":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_json(_amr_payload(case_dir))
+                elif path == "/api/probes":
+                    case_dir = _case_dir_from_query(query, default_case_dir)
+                    self._send_json(_probe_payload(case_dir))
                 elif path == "/api/fort/report":
                     case_dir = _case_dir_from_query(query, default_case_dir)
                     self._send_json(_fort_report(case_dir))
@@ -300,15 +304,17 @@ def _case_report(case_dir: Path) -> dict[str, object]:
         "surface": None,
         "mesh": None,
         "amr": None,
+        "probes": None,
     }
 
+    surface_bodies = []
     surface_path = case_dir / "unstruc_surface_in.dat"
     if surface_path.exists():
-        bodies = read_surface(surface_path)
+        surface_bodies = read_surface(surface_path)
         payload["surface"] = {
             "path": str(surface_path),
-            "bodies": _json_ready(summarize_surface(bodies)),
-            "errors": validate_surface(bodies),
+            "bodies": _json_ready(summarize_surface(surface_bodies)),
+            "errors": validate_surface(surface_bodies),
         }
 
     if (case_dir / "xgrid.dat").exists() and (case_dir / "ygrid.dat").exists():
@@ -327,8 +333,31 @@ def _case_report(case_dir: Path) -> dict[str, object]:
         except Exception as exc:
             payload["amr"] = {"ok": False, "path": str(amr_path), "error": str(exc), "layers": [], "block_count": 0}
 
+    probe_path = case_dir / "probe_in.dat"
+    if probe_path.exists():
+        try:
+            probe_payload = read_probe_payload(probe_path, surface_bodies)
+            payload["probes"] = {
+                "exists": True,
+                "ok": probe_payload.get("ok", False),
+                "path": str(probe_path),
+                "marker_count": probe_payload.get("marker_count", 0),
+                "fluid_count": probe_payload.get("fluid_count", 0),
+                "plotted_marker_count": probe_payload.get("plotted_marker_count", 0),
+                "unmatched_marker_count": probe_payload.get("unmatched_marker_count", 0),
+                "errors": probe_payload.get("errors", []),
+            }
+        except Exception as exc:
+            payload["probes"] = {"exists": True, "ok": False, "path": str(probe_path), "error": str(exc)}
+
     payload["fort"] = _fort_report(case_dir)
     return payload
+
+
+def _probe_payload(case_dir: Path) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    bodies = read_surface(surface_path) if surface_path.exists() else []
+    return read_probe_payload(case_dir / "probe_in.dat", bodies)
 
 
 def _amr_payload(case_dir: Path) -> dict[str, object]:

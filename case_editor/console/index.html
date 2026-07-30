@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup34">
+  <link rel="stylesheet" href="style.css?v=setup38">
 </head>
 <body>
   <main class="shell">
@@ -42,6 +42,7 @@
           <label><input id="showMeshBounds" type="checkbox" checked> mesh boundary</label>
           <label><input id="showDenseRegion" type="checkbox" checked> dense region</label>
           <label><input id="showAmrRegions" type="checkbox" checked> AMR layers</label>
+          <label id="probeLayerControl"><input id="showProbes" type="checkbox" disabled> probes</label>
           <label><input id="showFullMesh" type="checkbox"> sampled grid</label>
           <label><input id="showFortMotion" type="checkbox" checked> fort motion</label>
           <label><input id="showAxes" type="checkbox" checked> axes and ticks</label>
@@ -155,6 +156,7 @@
           <span id="subtitle">ready</span>
         </div>
         <div class="toolbar-actions">
+          <button id="resetView" type="button">Reset</button>
           <button id="topView" type="button">Top</button>
           <button id="isoView" class="active" type="button">ISO</button>
           <button id="xyView" type="button">XY</button>
@@ -168,6 +170,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup34"></script>
+  <script src="app.js?v=setup38"></script>
 </body>
 </html>

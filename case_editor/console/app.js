@@ -3,6 +3,7 @@
   const MAX_SURFACE_TRIANGLES = 80000;
   const INTERACTIVE_SURFACE_TRIANGLES = 12000;
   const MAX_GRID_LINES = 28;
+  const MAX_DRAWN_PROBES = 6000;
   const DENSE_UNIFORM_RATIO = 1.05;
   const AMR_COLORS = ["#d62828", "#2f80ed", "#f59f00", "#7b2cbf", "#2b9348", "#d9480f"];
   const MESH_INPUT_FIELDS = [
@@ -32,6 +33,7 @@
     caseDir: document.getElementById("caseDir"),
     loadCase: document.getElementById("loadCase"),
     fitView: document.getElementById("fitView"),
+    resetView: document.getElementById("resetView"),
     topView: document.getElementById("topView"),
     isoView: document.getElementById("isoView"),
     xyView: document.getElementById("xyView"),
@@ -48,6 +50,8 @@
     showMeshBounds: document.getElementById("showMeshBounds"),
     showDenseRegion: document.getElementById("showDenseRegion"),
     showAmrRegions: document.getElementById("showAmrRegions"),
+    probeLayerControl: document.getElementById("probeLayerControl"),
+    showProbes: document.getElementById("showProbes"),
     showFullMesh: document.getElementById("showFullMesh"),
     showFortMotion: document.getElementById("showFortMotion"),
     showAxes: document.getElementById("showAxes"),
@@ -91,6 +95,7 @@
     surface: null,
     mesh: { x: null, y: null, z: null, denseBox: null },
     amr: null,
+    probes: null,
     fort: null,
     motion: null,
     loadedFiles: [],
@@ -105,6 +110,7 @@
     panX: 0,
     panY: 0,
     dragging: false,
+    dragMode: null,
     interactingUntil: 0,
     lastX: 0,
     lastY: 0,
@@ -124,6 +130,7 @@
     });
     el.loadCase.addEventListener("click", loadCase);
     el.fitView.addEventListener("click", fit);
+    el.resetView.addEventListener("click", resetView);
     el.topView.addEventListener("click", topView);
     el.isoView.addEventListener("click", isoView);
     el.xyView.addEventListener("click", () => planeView("xy"));
@@ -139,6 +146,7 @@
       el.showMeshBounds,
       el.showDenseRegion,
       el.showAmrRegions,
+      el.showProbes,
       el.showFullMesh,
       el.showFortMotion,
       el.showAxes,
@@ -148,6 +156,8 @@
     window.addEventListener("mouseup", () => {
       if (state.dragging) {
         state.dragging = false;
+        state.dragMode = null;
+        el.viewport.classList.remove("panning");
         requestDraw();
       }
     });
@@ -186,10 +196,12 @@
       state.surface = null;
       state.mesh = { x: null, y: null, z: null, denseBox: null };
       state.amr = null;
+      state.probes = null;
       state.fort = report.fort || null;
       state.motion = null;
       state.loadedFiles = [];
       state.pendingGeometryFile = null;
+      setProbeLayerAvailable(false);
 
       if (report.surface) {
         addLoadedFile("surface", "unstruc_surface_in.dat", "case surface");
@@ -211,6 +223,27 @@
       if (report.amr && report.amr.ok) {
         state.amr = normalizeAmr(report.amr);
         addLoadedFile("amr", "amr_in.dat", "case AMR");
+      }
+      if (report.probes && report.probes.exists) {
+        setProbeLayerAvailable(true);
+        loads.push(fetchJson(`/api/probes${loadedQuery}`)
+          .then((probes) => {
+            state.probes = normalizeProbes(probes);
+            addLoadedFile("probes", "probe_in.dat", "case probes");
+          })
+          .catch((err) => {
+            state.probes = normalizeProbes({
+              ok: false,
+              exists: true,
+              path: report.probes.path || "",
+              marker_count: report.probes.marker_count || 0,
+              fluid_count: report.probes.fluid_count || 0,
+              markers: [],
+              fluids: [],
+              errors: [cleanErrorMessage(err)],
+            });
+            addLoadedFile("probes", "probe_in.dat", "probe parse error");
+          }));
       }
       if (backendSupportsFort(report)) {
         loads.push(fetchJson(`/api/fort/report${loadedQuery}`)
@@ -360,6 +393,10 @@
     if (id === "y") state.mesh.y = null;
     if (id === "z") state.mesh.z = null;
     if (id === "amr") state.amr = null;
+    if (id === "probes") {
+      state.probes = null;
+      setProbeLayerAvailable(false);
+    }
     if (id === "mesh-input") {
       fillMeshControls(defaultMeshParams());
       state.meshControlsReady = true;
@@ -1293,6 +1330,41 @@
     };
   }
 
+  function normalizeProbes(probes) {
+    const rawMarkers = Array.isArray(probes && probes.markers) ? probes.markers : [];
+    const rawFluids = Array.isArray(probes && probes.fluids) ? probes.fluids : [];
+    return {
+      ok: probes && probes.ok !== false,
+      exists: probes && probes.exists !== false,
+      path: probes && probes.path ? String(probes.path) : "",
+      markerCount: Math.trunc(Number(probes && probes.marker_count) || rawMarkers.length),
+      fluidCount: Math.trunc(Number(probes && probes.fluid_count) || rawFluids.length),
+      plottedMarkerCount: Math.trunc(Number(probes && probes.plotted_marker_count) || rawMarkers.length),
+      unmatchedMarkerCount: Math.trunc(Number(probes && probes.unmatched_marker_count) || 0),
+      errors: Array.isArray(probes && probes.errors) ? probes.errors.map(String) : [],
+      markers: rawMarkers.map((marker, markerIndex) => ({
+        index: Math.trunc(Number(marker.index) || markerIndex + 1),
+        body: Math.trunc(Number(marker.body) || 0),
+        reference: Math.trunc(Number(marker.reference) || 0),
+        source: marker.source ? String(marker.source) : "marker",
+        point: vector3(marker.point),
+      })),
+      fluids: rawFluids.map((probe, probeIndex) => ({
+        index: Math.trunc(Number(probe.index) || probeIndex + 1),
+        point: vector3(probe.point),
+      })),
+    };
+  }
+
+  function setProbeLayerAvailable(available) {
+    if (!el.showProbes) return;
+    el.showProbes.disabled = !available;
+    if (el.probeLayerControl) {
+      el.probeLayerControl.classList.toggle("disabled", !available);
+      el.probeLayerControl.title = available ? "" : "No probe_in.dat detected for this case";
+    }
+  }
+
   function vector3(value) {
     const raw = Array.isArray(value) ? value : [];
     return [Number(raw[0]) || 0, Number(raw[1]) || 0, Number(raw[2]) || 0];
@@ -1367,6 +1439,7 @@
     if (el.showFullMesh.checked) drawSampledGrid(ctx, rect);
     drawSurface(ctx, rect);
     drawFortMotion(ctx, rect);
+    drawProbes(ctx, rect);
   }
 
   function drawSurface(ctx, rect) {
@@ -1412,6 +1485,57 @@
       ctx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
     }
     ctx.restore();
+  }
+
+  function drawProbes(ctx, rect) {
+    if (!el.showProbes.checked || !state.probes) return;
+    const markers = sample(state.probes.markers, MAX_DRAWN_PROBES);
+    const fluids = sample(state.probes.fluids, MAX_DRAWN_PROBES);
+
+    ctx.save();
+    ctx.globalAlpha = 0.82;
+    markers.forEach((probe) => {
+      const p = projectPoint(rect, probe.point[0], probe.point[1], probe.point[2]);
+      drawProbeMarker(ctx, p, "#b11654");
+    });
+    fluids.forEach((probe) => {
+      const p = projectPoint(rect, probe.point[0], probe.point[1], probe.point[2]);
+      drawFluidProbe(ctx, p, "#0f7b68");
+    });
+    ctx.restore();
+  }
+
+  function drawProbeMarker(ctx, point, color) {
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 3.8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawFluidProbe(ctx, point, color) {
+    const radius = 3.4;
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(point.x - radius, point.y);
+    ctx.lineTo(point.x + radius, point.y);
+    ctx.moveTo(point.x, point.y - radius);
+    ctx.lineTo(point.x, point.y + radius);
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(point.x - radius, point.y);
+    ctx.lineTo(point.x + radius, point.y);
+    ctx.moveTo(point.x, point.y - radius);
+    ctx.lineTo(point.x, point.y + radius);
+    ctx.stroke();
   }
 
   function drawMeshBounds(ctx, rect) {
@@ -1768,6 +1892,10 @@
         for (let i = 0; i < frame.points.length; i += 3) add(frame.points[i], frame.points[i + 1], frame.points[i + 2]);
       });
     }
+    if (state.probes) {
+      state.probes.markers.forEach((probe) => add(probe.point[0], probe.point[1], probe.point[2]));
+      state.probes.fluids.forEach((probe) => add(probe.point[0], probe.point[1], probe.point[2]));
+    }
     if (state.amr) {
       state.amr.layers.forEach((layer) => {
         layer.blocks.forEach((block) => {
@@ -1924,6 +2052,16 @@
     requestDraw();
   }
 
+  function resetView() {
+    state.viewMode = "iso";
+    state.angleX = 0.62;
+    state.angleY = -0.78;
+    state.zoom = 1;
+    state.panX = 0;
+    state.panY = 0;
+    setActiveViewButton(el.isoView);
+  }
+
   function topView() {
     state.viewMode = "top";
     state.angleX = 1.55;
@@ -1954,7 +2092,10 @@
   }
 
   function startDrag(event) {
+    event.preventDefault();
     state.dragging = true;
+    state.dragMode = event.ctrlKey || isPlaneView() ? "pan" : "rotate";
+    el.viewport.classList.toggle("panning", state.dragMode === "pan");
     state.lastX = event.clientX;
     state.lastY = event.clientY;
   }
@@ -1963,7 +2104,9 @@
     if (!state.dragging) return;
     const dx = event.clientX - state.lastX;
     const dy = event.clientY - state.lastY;
-    if (isPlaneView()) {
+    const shouldPan = state.dragMode === "pan" || event.ctrlKey || isPlaneView();
+    el.viewport.classList.toggle("panning", shouldPan);
+    if (shouldPan) {
       state.panX += dx;
       state.panY += dy;
     } else {
@@ -2002,6 +2145,12 @@
     if (state.amr && state.amr.layers.length) {
       const blockCount = state.amr.layers.reduce((sum, layer) => sum + layer.blocks.length, 0);
       lines.push(`AMR layers    : ${state.amr.layers.length} layers, ${blockCount} blocks`);
+    }
+    if (state.probes) {
+      lines.push(
+        `probes        : marker ${state.probes.plottedMarkerCount}/${state.probes.markerCount}, fluid ${state.probes.fluidCount}`
+      );
+      if (state.probes.unmatchedMarkerCount) lines.push(`probe warnings : ${state.probes.unmatchedMarkerCount} marker probes unresolved`);
     }
     if (state.fort && state.fort.files && state.fort.files.length) {
       const okCount = state.fort.files.filter((item) => item.ok && item.node_match !== false).length;
@@ -2048,6 +2197,9 @@
       lines.push(`fort files: ${okCount}/${report.fort.files.length} matched`);
     }
     if (report.amr && report.amr.ok) lines.push(`AMR: ${report.amr.layers.length} layers, ${report.amr.block_count || 0} blocks`);
+    if (report.probes && report.probes.exists) {
+      lines.push(`probes: marker ${report.probes.plotted_marker_count || 0}/${report.probes.marker_count || 0}, fluid ${report.probes.fluid_count || 0}`);
+    }
     lines.push(`dense region: ${report.mesh && report.mesh.dense_box ? "available" : "not found"}`);
     lines.push(`validation: ${report.validation.length ? "FAIL" : "PASS"}`);
     report.validation.forEach((item) => lines.push(`- ${item}`));
