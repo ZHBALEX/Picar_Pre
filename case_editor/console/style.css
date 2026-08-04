@@ -80,12 +80,13 @@ h2 {
 }
 
 .mode-tabs {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .mode-tabs button {
+  flex: 1 1 88px;
   padding: 7px 6px;
   font-size: 13px;
 }
@@ -235,6 +236,17 @@ h2 {
 .item-meta {
   color: #71808c;
   font-size: 11px;
+}
+
+.item-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.item-actions button {
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .mini-field {

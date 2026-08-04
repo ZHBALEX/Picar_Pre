@@ -586,9 +586,19 @@
         return `
           <div class="item-row">
             <div class="item-main" title="${escapeHtml(item.path)}">Body ${item.body}: ${escapeHtml(item.name)}<br><span class="item-meta">${escapeHtml(status)}</span></div>
+            <div class="item-actions">
+              <button type="button" data-preview-fort="${escapeHtml(item.body)}">Preview</button>
+              <button type="button" data-remove-fort="${escapeHtml(item.body)}">Remove</button>
+            </div>
           </div>
         `;
       }).join("");
+      el.fortList.querySelectorAll("[data-preview-fort]").forEach((button) => {
+        button.addEventListener("click", () => previewFortBody(Number(button.dataset.previewFort)));
+      });
+      el.fortList.querySelectorAll("[data-remove-fort]").forEach((button) => {
+        button.addEventListener("click", () => removeFortBody(Number(button.dataset.removeFort)));
+      });
     }
 
     const bodyIds = files.length
@@ -639,6 +649,43 @@
     recomputeBounds();
     requestDraw();
     updateStats();
+  }
+
+  async function previewFortBody(bodyId) {
+    if (!Number.isFinite(bodyId) || bodyId <= 0) {
+      setStatus("Invalid fort body id.");
+      return;
+    }
+    el.fortBody.value = String(bodyId);
+    await previewFortMotion();
+  }
+
+  async function removeFortBody(bodyId) {
+    if (!Number.isFinite(bodyId) || bodyId <= 0) {
+      setStatus("Invalid fort body id.");
+      return;
+    }
+    const fortStart = state.fort && state.fort.fort_start ? state.fort.fort_start : 41;
+    const fortName = `fort.${fortStart + bodyId - 1}`;
+    if (!window.confirm(`Remove ${fortName} and shift later fort files down?`)) return;
+    try {
+      const result = await postJson("/api/fort/remove", {
+        case_dir: el.caseDir.value.trim(),
+        body_ids: [bodyId],
+        fort_start: fortStart,
+      });
+      if (state.motion && Number(state.motion.bodyId) >= bodyId) {
+        state.motion = null;
+      }
+      await loadCase();
+      const removed = result.removed && result.removed.length ? result.removed.map((item) => item.name).join(", ") : "none";
+      const moved = result.moved && result.moved.length
+        ? result.moved.map((item) => `${item.from_name} -> ${item.to_name}`).join(", ")
+        : "none";
+      setStatus(`Removed fort files: ${removed}\nShifted fort files: ${moved}`);
+    } catch (err) {
+      setStatus(`Remove fort failed: ${cleanErrorMessage(err)}`);
+    }
   }
 
   function selectedBodyIds() {

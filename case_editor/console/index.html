@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=setup41">
+  <link rel="stylesheet" href="style.css?v=setup46">
 </head>
 <body>
   <main class="shell">
@@ -25,15 +25,6 @@
         <button data-panel="amrPanel" type="button">AMR</button>
         <button data-panel="fortPanel" type="button">Fort</button>
       </nav>
-      <section class="dropzone" id="dropzone">
-        <input id="fileInput" type="file" multiple>
-        <strong>Drop files here</strong>
-        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, or drop STL to import</span>
-      </section>
-      <section>
-        <h2>Loaded Files</h2>
-        <div id="loadedFiles" class="item-list"></div>
-      </section>
       <section id="setupPanel" class="control-panel active">
         <h2>Scene Layers</h2>
         <div class="layer-list">
@@ -156,6 +147,15 @@
         </div>
         <p class="hint">Gray points are sampled fort snapshots; red is the selected frame.</p>
       </section>
+      <section class="dropzone" id="dropzone">
+        <input id="fileInput" type="file" multiple>
+        <strong>Drop files here</strong>
+        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, or drop STL to import</span>
+      </section>
+      <section>
+        <h2>Loaded Files</h2>
+        <div id="loadedFiles" class="item-list"></div>
+      </section>
       <section>
         <h2>Commands</h2>
         <pre id="commands"></pre>
@@ -182,6 +182,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=setup41"></script>
+  <script src="app.js?v=setup46"></script>
 </body>
 </html>

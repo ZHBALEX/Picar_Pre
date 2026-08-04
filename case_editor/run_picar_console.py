@@ -85,6 +85,7 @@ def make_handler(default_case_dir: Path):
                         "origin_shift": True,
                         "geometry_transform": True,
                         "fort_preview": True,
+                        "fort_remove": True,
                         "control_sync": True,
                         "input_sync": True,
                         "setup_sync": True,
@@ -235,6 +236,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "path": str(project.surface_path), "bodies": _json_ready(summarize_surface(kept)), "report": _case_report(case_dir)}
     if path == "/api/fort/preview":
         return _fort_preview_payload(case_dir, payload)
+    if path == "/api/fort/remove":
+        return _remove_fort_payload(case_dir, payload)
     raise ValueError(f"Unknown API route: {path}")
 
 
@@ -604,6 +607,72 @@ def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[st
             "last_time": info.last_time,
         },
     }
+
+
+def _remove_fort_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    body_ids = _payload_body_ids(payload) or []
+    if not body_ids:
+        raise ValueError("Select at least one fort file to remove")
+    fort_start = int(payload.get("fort_start") or 41)
+    remove_body_ids = sorted(set(body_ids))
+    removed: list[dict[str, object]] = []
+    missing: list[dict[str, object]] = []
+    moved: list[dict[str, object]] = []
+    fort_files = _indexed_fort_files(case_dir, fort_start)
+
+    for body_id in remove_body_ids:
+        if body_id <= 0:
+            raise ValueError(f"body_id must be positive, got {body_id}")
+        fort_number = fort_start + body_id - 1
+        path = case_dir / f"fort.{fort_number}"
+        item = {"body": body_id, "name": path.name, "path": str(path)}
+        if path.exists():
+            if not path.is_file():
+                raise ValueError(f"Not a file: {path}")
+            path.unlink()
+            removed.append(item)
+        else:
+            missing.append(item)
+
+    for item in fort_files:
+        old_body_id = item["body"]
+        old_path = item["path"]
+        if old_body_id in remove_body_ids or not old_path.exists():
+            continue
+        shift = sum(1 for removed_body_id in remove_body_ids if removed_body_id < old_body_id)
+        if shift <= 0:
+            continue
+        new_body_id = old_body_id - shift
+        new_path = case_dir / f"fort.{fort_start + new_body_id - 1}"
+        if new_path.exists():
+            raise FileExistsError(f"Cannot shift {old_path.name} to {new_path.name}; target already exists")
+        old_path.replace(new_path)
+        moved.append(
+            {
+                "from_body": old_body_id,
+                "to_body": new_body_id,
+                "from_name": old_path.name,
+                "to_name": new_path.name,
+                "from_path": str(old_path),
+                "to_path": str(new_path),
+            }
+        )
+
+    return {"ok": True, "removed": removed, "missing": missing, "moved": moved, "report": _case_report(case_dir)}
+
+
+def _indexed_fort_files(case_dir: Path, fort_start: int) -> list[dict[str, object]]:
+    files: list[dict[str, object]] = []
+    for path in sorted(case_dir.glob("fort.*")):
+        suffix = path.name.split(".", 1)[1]
+        if not suffix.isdigit() or not path.is_file():
+            continue
+        fort_number = int(suffix)
+        body_id = fort_number - fort_start + 1
+        if body_id <= 0:
+            continue
+        files.append({"body": body_id, "fort_number": fort_number, "path": path})
+    return sorted(files, key=lambda item: int(item["body"]))
 
 
 def _fort_preview_frame_indices(frame_count: int, samples: int, highlight_frame: int) -> list[int]:
