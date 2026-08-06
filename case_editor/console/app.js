@@ -45,6 +45,8 @@
     stats: document.getElementById("stats"),
     subtitle: document.getElementById("subtitle"),
     commands: document.getElementById("commands"),
+    exportPlotJson: document.getElementById("exportPlotJson"),
+    exportPlotPng: document.getElementById("exportPlotPng"),
     showSurfacePoints: document.getElementById("showSurfacePoints"),
     showSurfaceLines: document.getElementById("showSurfaceLines"),
     showMeshBounds: document.getElementById("showMeshBounds"),
@@ -141,6 +143,8 @@
     el.xyView.addEventListener("click", () => planeView("xy"));
     el.xzView.addEventListener("click", () => planeView("xz"));
     el.yzView.addEventListener("click", () => planeView("yz"));
+    el.exportPlotJson.addEventListener("click", exportPlotJson);
+    el.exportPlotPng.addEventListener("click", exportPlotPng);
     el.fileInput.addEventListener("change", () => readFiles(el.fileInput.files));
     ["dragenter", "dragover"].forEach((name) => el.dropzone.addEventListener(name, onDrag));
     ["dragleave", "drop"].forEach((name) => el.dropzone.addEventListener(name, offDrag));
@@ -1326,6 +1330,139 @@
     } catch (err) {
       setStatus(`STL export failed: ${err.message || err}`);
     }
+  }
+
+  function exportPlotJson() {
+    try {
+      const payload = buildPlotExport();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      downloadBlob(blob, `picar_plot_${timestampForFilename()}.json`);
+      setStatus("Plot JSON exported.");
+    } catch (err) {
+      setStatus(`Plot JSON export failed: ${err.message || err}`);
+    }
+  }
+
+  function exportPlotPng() {
+    try {
+      draw();
+      if (!el.viewport.toBlob) {
+        throw new Error("Canvas PNG export is not supported by this browser.");
+      }
+      el.viewport.toBlob((blob) => {
+        if (!blob) {
+          setStatus("Plot PNG export failed: empty canvas image.");
+          return;
+        }
+        downloadBlob(blob, `picar_plot_${timestampForFilename()}.png`);
+        setStatus("Plot PNG exported.");
+      }, "image/png");
+    } catch (err) {
+      setStatus(`Plot PNG export failed: ${err.message || err}`);
+    }
+  }
+
+  function buildPlotExport() {
+    return {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      case_dir: el.caseDir.value.trim(),
+      canvas: {
+        width: el.viewport.width,
+        height: el.viewport.height,
+        css_width: Math.round(el.viewport.getBoundingClientRect().width),
+        css_height: Math.round(el.viewport.getBoundingClientRect().height),
+        device_pixel_ratio: window.devicePixelRatio || 1,
+      },
+      view: {
+        mode: state.viewMode,
+        angle_x: state.angleX,
+        angle_y: state.angleY,
+        zoom: state.zoom,
+        pan_x: state.panX,
+        pan_y: state.panY,
+        bounds: state.bounds ? {
+          min: state.bounds.min.slice(),
+          max: state.bounds.max.slice(),
+          span: state.bounds.span,
+        } : null,
+      },
+      layers: {
+        surface_points: el.showSurfacePoints.checked,
+        surface_triangles: el.showSurfaceLines.checked,
+        mesh_boundary: el.showMeshBounds.checked,
+        dense_region: el.showDenseRegion.checked,
+        amr_regions: el.showAmrRegions.checked,
+        probes: el.showProbes.checked,
+        sampled_grid: el.showFullMesh.checked,
+        fort_motion: el.showFortMotion.checked,
+        axes_and_ticks: el.showAxes.checked,
+      },
+      data: {
+        surface: serializeSurface(state.surface),
+        mesh: serializeMesh(state.mesh),
+        amr: state.amr || null,
+        probes: state.probes || null,
+        fort: state.fort || null,
+        motion: serializeMotion(state.motion),
+      },
+    };
+  }
+
+  function serializeSurface(surface) {
+    if (!surface) return null;
+    return {
+      bodies: surface.bodies.map((body, bodyIndex) => ({
+        body_id: bodyIndex + 1,
+        node_count: body.nodeCount,
+        elem_count: body.elemCount,
+        points: arrayToList(body.points),
+        elems: arrayToList(body.elems),
+      })),
+    };
+  }
+
+  function serializeMesh(mesh) {
+    return {
+      x: mesh.x ? arrayToList(mesh.x) : null,
+      y: mesh.y ? arrayToList(mesh.y) : null,
+      z: mesh.z ? arrayToList(mesh.z) : null,
+      dense_box: mesh.denseBox || null,
+    };
+  }
+
+  function serializeMotion(motion) {
+    if (!motion) return null;
+    return {
+      body_id: motion.bodyId,
+      node_count: motion.nodeCount,
+      frame: motion.frame,
+      info: motion.info || null,
+      frames: motion.frames.map((frame) => ({
+        frame: frame.frame,
+        time: frame.time,
+        highlight: frame.highlight,
+        points: arrayToList(frame.points),
+      })),
+    };
+  }
+
+  function arrayToList(values) {
+    return Array.prototype.slice.call(values || []);
+  }
+
+  function downloadBlob(blob, filename) {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+
+  function timestampForFilename() {
+    return new Date().toISOString().replace(/[:.]/g, "-");
   }
 
   function fileToBase64(file) {
