@@ -83,6 +83,31 @@
     amrResize: document.getElementById("amrResize"),
     amrList: document.getElementById("amrList"),
     saveAmr: document.getElementById("saveAmr"),
+    probeGenerateBody: document.getElementById("probeGenerateBody"),
+    probePlaneAxis: document.getElementById("probePlaneAxis"),
+    probePlaneValue: document.getElementById("probePlaneValue"),
+    probeSamples: document.getElementById("probeSamples"),
+    probeTolerance: document.getElementById("probeTolerance"),
+    probeBandFactor: document.getElementById("probeBandFactor"),
+    probeSides: document.getElementById("probeSides"),
+    probeDeduplicate: document.getElementById("probeDeduplicate"),
+    generateProbes: document.getElementById("generateProbes"),
+    probeEditType: document.getElementById("probeEditType"),
+    probeEditIndex: document.getElementById("probeEditIndex"),
+    probeMarkerFields: document.getElementById("probeMarkerFields"),
+    probeEditBody: document.getElementById("probeEditBody"),
+    probeEditReference: document.getElementById("probeEditReference"),
+    probeEditX: document.getElementById("probeEditX"),
+    probeEditY: document.getElementById("probeEditY"),
+    probeEditZ: document.getElementById("probeEditZ"),
+    moveProbeToReference: document.getElementById("moveProbeToReference"),
+    applyProbeEdit: document.getElementById("applyProbeEdit"),
+    addMarkerProbe: document.getElementById("addMarkerProbe"),
+    addFluidProbe: document.getElementById("addFluidProbe"),
+    deleteProbe: document.getElementById("deleteProbe"),
+    saveProbes: document.getElementById("saveProbes"),
+    reloadProbes: document.getElementById("reloadProbes"),
+    probeReport: document.getElementById("probeReport"),
     syncProfile: document.getElementById("syncProfile"),
     syncFortStart: document.getElementById("syncFortStart"),
     previewSetupSync: document.getElementById("previewSetupSync"),
@@ -103,6 +128,9 @@
     mesh: { x: null, y: null, z: null, denseBox: null },
     amr: null,
     probes: null,
+    probeEditing: false,
+    probeTarget: null,
+    probeResolveRequest: 0,
     fort: null,
     motion: null,
     loadedFiles: [],
@@ -182,6 +210,25 @@
     el.generateMesh.addEventListener("click", generateMesh);
     el.amrResize.addEventListener("change", updateAmrFromControls);
     el.saveAmr.addEventListener("click", saveAmr);
+    el.generateProbes.addEventListener("click", generateProbePreview);
+    el.probeEditType.addEventListener("change", () => {
+      stopProbeEditing();
+      renderProbePanel();
+    });
+    el.probeEditIndex.addEventListener("pointerdown", beginProbeEditing);
+    el.probeEditIndex.addEventListener("change", () => {
+      fillSelectedProbeFields();
+      beginProbeEditing();
+    });
+    el.probeEditBody.addEventListener("change", previewSelectedMarkerReference);
+    el.probeEditReference.addEventListener("change", previewSelectedMarkerReference);
+    el.moveProbeToReference.addEventListener("click", moveSelectedProbeToReference);
+    el.applyProbeEdit.addEventListener("click", applySelectedProbePosition);
+    el.addMarkerProbe.addEventListener("click", addMarkerProbe);
+    el.addFluidProbe.addEventListener("click", addFluidProbe);
+    el.deleteProbe.addEventListener("click", deleteSelectedProbe);
+    el.saveProbes.addEventListener("click", saveProbes);
+    el.reloadProbes.addEventListener("click", loadCase);
     el.previewSetupSync.addEventListener("click", previewSetupSync);
     el.applySetupSync.addEventListener("click", applySetupSync);
     el.previewFort.addEventListener("click", previewFortMotion);
@@ -208,6 +255,7 @@
       state.mesh = { x: null, y: null, z: null, denseBox: null };
       state.amr = null;
       state.probes = null;
+      stopProbeEditing();
       state.fort = report.fort || null;
       state.motion = null;
       state.loadedFiles = [];
@@ -240,6 +288,7 @@
         loads.push(fetchJson(`/api/probes${loadedQuery}`)
           .then((probes) => {
             state.probes = normalizeProbes(probes);
+            el.showProbes.checked = true;
             addLoadedFile("probes", "probe_in.dat", "case probes");
           })
           .catch((err) => {
@@ -294,6 +343,7 @@
     renderBodyList();
     renderAmrPanel();
     renderFortPanel();
+    renderProbePanel();
     updateCommands();
   }
 
@@ -355,6 +405,7 @@
     renderLoadedFiles();
     renderBodyList();
     renderAmrPanel();
+    renderProbePanel();
   }
 
   async function loadSelectedMeshInput() {
@@ -422,6 +473,7 @@
     renderLoadedFiles();
     renderBodyList();
     renderAmrPanel();
+    renderProbePanel();
     requestDraw();
   }
 
@@ -529,6 +581,357 @@
     } catch (err) {
       setStatus(`Save AMR failed: ${err.message || err}`);
     }
+  }
+
+  function editableProbes() {
+    if (!state.probes) {
+      state.probes = normalizeProbes({ ok: true, exists: false, markers: [], fluids: [], errors: [] });
+    }
+    return state.probes;
+  }
+
+  function bodySelectOptions(selected) {
+    const count = state.surface ? state.surface.bodies.length : 0;
+    if (!count) return `<option value="1">Body 1</option>`;
+    return Array.from({ length: count }, (_, index) => {
+      const bodyId = index + 1;
+      return `<option value="${bodyId}"${bodyId === selected ? " selected" : ""}>Body ${bodyId}</option>`;
+    }).join("");
+  }
+
+  function renderProbePanel() {
+    if (!el.probeEditType || !el.probeEditIndex) return;
+    const generateBody = Math.max(1, Number(el.probeGenerateBody.value) || 1);
+    const editBody = Math.max(1, Number(el.probeEditBody.value) || 1);
+    el.probeGenerateBody.innerHTML = bodySelectOptions(generateBody);
+    el.probeEditBody.innerHTML = bodySelectOptions(editBody);
+
+    const probes = state.probes;
+    const type = el.probeEditType.value === "fluid" ? "fluid" : "marker";
+    const items = probes ? (type === "marker" ? probes.markers : probes.fluids) : [];
+    const oldIndex = Math.max(0, Math.trunc(Number(el.probeEditIndex.value) || 0));
+    el.probeEditIndex.innerHTML = items.length
+      ? items.map((item, index) => {
+        const label = type === "marker"
+          ? `#${index + 1} | body ${item.body} | ref ${item.reference}`
+          : `#${index + 1} | (${item.point.map(formatShort).join(", ")})`;
+        return `<option value="${index}">${escapeHtml(label)}</option>`;
+      }).join("")
+      : `<option value="">No ${type} probes</option>`;
+    if (items.length) el.probeEditIndex.value = String(Math.min(oldIndex, items.length - 1));
+    el.probeEditIndex.disabled = !items.length;
+    el.probeMarkerFields.style.display = type === "marker" ? "grid" : "none";
+    el.moveProbeToReference.hidden = type !== "marker";
+    el.moveProbeToReference.disabled = !items.length || !state.probeTarget;
+    el.applyProbeEdit.textContent = type === "marker" ? "Snap XYZ" : "Apply XYZ";
+    el.deleteProbe.disabled = !items.length;
+    el.applyProbeEdit.disabled = !items.length;
+    fillSelectedProbeFields();
+    updateProbeReport();
+  }
+
+  function selectedProbe() {
+    if (!state.probes) return null;
+    const type = el.probeEditType.value === "fluid" ? "fluid" : "marker";
+    const items = type === "marker" ? state.probes.markers : state.probes.fluids;
+    const index = Math.trunc(Number(el.probeEditIndex.value));
+    if (!Number.isFinite(index) || index < 0 || index >= items.length) return null;
+    return { type, items, index, probe: items[index] };
+  }
+
+  function fillSelectedProbeFields() {
+    const selected = selectedProbe();
+    if (!selected) {
+      [el.probeEditX, el.probeEditY, el.probeEditZ].forEach((input) => { input.value = ""; });
+      el.probeEditReference.value = "";
+      requestDraw();
+      return;
+    }
+    const probe = selected.probe;
+    if (selected.type === "marker") {
+      el.probeEditBody.value = String(probe.body);
+      el.probeEditReference.value = String(probe.reference);
+    }
+    el.probeEditX.value = formatControlNumber(probe.point[0]);
+    el.probeEditY.value = formatControlNumber(probe.point[1]);
+    el.probeEditZ.value = formatControlNumber(probe.point[2]);
+    requestDraw();
+  }
+
+  function beginProbeEditing() {
+    const selected = selectedProbe();
+    if (!selected) return;
+    state.probeEditing = true;
+    state.probeTarget = null;
+    if (selected.type === "marker") previewSelectedMarkerReference();
+    updateProbeReport();
+    requestDraw();
+  }
+
+  function stopProbeEditing() {
+    state.probeEditing = false;
+    state.probeTarget = null;
+    state.probeResolveRequest += 1;
+    if (el.moveProbeToReference) el.moveProbeToReference.disabled = true;
+    requestDraw();
+  }
+
+  async function previewSelectedMarkerReference() {
+    const selected = selectedProbe();
+    if (!selected || selected.type !== "marker") {
+      stopProbeEditing();
+      return null;
+    }
+    state.probeEditing = true;
+    state.probeTarget = null;
+    el.moveProbeToReference.disabled = true;
+    const bodyId = Math.max(1, Math.trunc(numValue(el.probeEditBody, selected.probe.body || 1)));
+    const reference = Math.max(1, Math.trunc(numValue(el.probeEditReference, selected.probe.reference || 1)));
+    const requestId = ++state.probeResolveRequest;
+    requestDraw();
+    try {
+      const result = await postJson("/api/probes/resolve", {
+        case_dir: el.caseDir.value.trim(),
+        body_id: bodyId,
+        reference,
+      });
+      if (requestId !== state.probeResolveRequest || !state.probeEditing) return null;
+      state.probeTarget = {
+        body: bodyId,
+        reference: result.reference,
+        source: result.source || "node",
+        point: vector3(result.point),
+      };
+      el.moveProbeToReference.disabled = false;
+      updateProbeReport();
+      requestDraw();
+      return state.probeTarget;
+    } catch (err) {
+      if (requestId === state.probeResolveRequest) {
+        state.probeTarget = null;
+        el.moveProbeToReference.disabled = true;
+        requestDraw();
+        setStatus(`Reference preview failed: ${cleanErrorMessage(err)}`);
+      }
+      return null;
+    }
+  }
+
+  async function moveSelectedProbeToReference() {
+    const selected = selectedProbe();
+    if (!selected || selected.type !== "marker") return;
+    state.probeEditing = true;
+    const target = state.probeTarget || await previewSelectedMarkerReference();
+    if (!target) return;
+    selected.probe.body = target.body;
+    selected.probe.reference = target.reference;
+    selected.probe.source = target.source;
+    selected.probe.point = target.point.slice();
+    refreshProbeCounts();
+    renderProbePanel();
+    recomputeBounds();
+    requestDraw();
+    setStatus(`Moved marker probe ${selected.index + 1} to body ${target.body}, ${target.source} ${target.reference}. Save to write probe_in.dat.`);
+  }
+
+  async function generateProbePreview() {
+    if (!state.surface || !state.surface.bodies.length) {
+      setStatus("Automatic probe generation requires a loaded surface.");
+      return;
+    }
+    try {
+      const result = await postJson("/api/probes/generate", {
+        case_dir: el.caseDir.value.trim(),
+        body_id: Math.max(1, Math.trunc(numValue(el.probeGenerateBody, 1))),
+        plane_axis: el.probePlaneAxis.value || "z",
+        plane_value: numValue(el.probePlaneValue, 0),
+        n_samples: Math.max(1, Math.trunc(numValue(el.probeSamples, 30))),
+        plane_tolerance: Math.max(0, numValue(el.probeTolerance, 0.02)),
+        x_band_factor: Math.max(0.001, numValue(el.probeBandFactor, 0.25)),
+        sides: el.probeSides.value || "both",
+        deduplicate: el.probeDeduplicate.checked,
+        preserve_fluids: true,
+      });
+      state.probes = normalizeProbes(result);
+      state.probes.preview = true;
+      stopProbeEditing();
+      setProbeLayerAvailable(true);
+      el.showProbes.checked = true;
+      renderProbePanel();
+      recomputeBounds();
+      requestDraw();
+      const quality = state.probes.generation
+        ? ` Max slice error ${formatShort(state.probes.generation.max_plane_error || 0)}, max X error ${formatShort(state.probes.generation.max_x_error || 0)}.`
+        : "";
+      setStatus(`Probe preview generated: ${state.probes.markerCount} marker, ${state.probes.fluidCount} fluid.${quality} Save to write probe_in.dat.`);
+    } catch (err) {
+      setStatus(`Probe generation failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  async function applySelectedProbePosition() {
+    const selected = selectedProbe();
+    if (!selected) return;
+    state.probeEditing = true;
+    const point = [numValue(el.probeEditX), numValue(el.probeEditY), numValue(el.probeEditZ)];
+    try {
+      if (selected.type === "fluid") {
+        selected.probe.point = point;
+        state.probeTarget = null;
+        setStatus(`Updated fluid probe ${selected.index + 1}. Save to write probe_in.dat.`);
+      } else {
+        const bodyId = Math.max(1, Math.trunc(numValue(el.probeEditBody, selected.probe.body || 1)));
+        const result = await postJson("/api/probes/snap", {
+          case_dir: el.caseDir.value.trim(),
+          body_id: bodyId,
+          point,
+        });
+        selected.probe.body = bodyId;
+        selected.probe.reference = result.reference;
+        selected.probe.point = vector3(result.point);
+        selected.probe.source = "node";
+        state.probeTarget = {
+          body: bodyId,
+          reference: result.reference,
+          source: "node",
+          point: vector3(result.point),
+        };
+        setStatus(`Marker probe ${selected.index + 1} snapped to body ${bodyId}, node ${result.reference} (distance ${formatShort(result.distance)}).`);
+      }
+      refreshProbeCounts();
+      renderProbePanel();
+      recomputeBounds();
+      requestDraw();
+    } catch (err) {
+      setStatus(`Probe position update failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  async function addMarkerProbe() {
+    if (!state.surface || !state.surface.bodies.length) {
+      setStatus("Adding a marker probe requires a loaded surface.");
+      return;
+    }
+    const probes = editableProbes();
+    const bodyId = Math.max(1, Math.trunc(numValue(el.probeEditBody, 1)));
+    const bounds = bodyBounds(state.surface.bodies[Math.min(bodyId - 1, state.surface.bodies.length - 1)]);
+    const point = [0, 1, 2].map((axis) => 0.5 * (bounds.min[axis] + bounds.max[axis]));
+    try {
+      const result = await postJson("/api/probes/snap", { case_dir: el.caseDir.value.trim(), body_id: bodyId, point });
+      probes.markers.push({
+        index: probes.markers.length + 1,
+        body: bodyId,
+        reference: result.reference,
+        source: "node",
+        point: vector3(result.point),
+      });
+      refreshProbeCounts();
+      state.probeEditing = true;
+      state.probeTarget = {
+        body: bodyId,
+        reference: result.reference,
+        source: "node",
+        point: vector3(result.point),
+      };
+      el.probeEditType.value = "marker";
+      renderProbePanel();
+      el.probeEditIndex.value = String(probes.markers.length - 1);
+      fillSelectedProbeFields();
+      setProbeLayerAvailable(true);
+      el.showProbes.checked = true;
+      setStatus("Marker probe added at the nearest surface node. Adjust XYZ and apply if needed.");
+    } catch (err) {
+      setStatus(`Add marker probe failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  function addFluidProbe() {
+    const probes = editableProbes();
+    const point = [numValue(el.probeEditX), numValue(el.probeEditY), numValue(el.probeEditZ)];
+    probes.fluids.push({ index: probes.fluids.length + 1, point });
+    refreshProbeCounts();
+    state.probeEditing = true;
+    state.probeTarget = null;
+    el.probeEditType.value = "fluid";
+    renderProbePanel();
+    el.probeEditIndex.value = String(probes.fluids.length - 1);
+    fillSelectedProbeFields();
+    setProbeLayerAvailable(true);
+    el.showProbes.checked = true;
+    recomputeBounds();
+    requestDraw();
+    setStatus("Fluid probe added. Edit XYZ, then save probe_in.dat.");
+  }
+
+  function deleteSelectedProbe() {
+    const selected = selectedProbe();
+    if (!selected) return;
+    selected.items.splice(selected.index, 1);
+    stopProbeEditing();
+    refreshProbeCounts();
+    renderProbePanel();
+    recomputeBounds();
+    requestDraw();
+    setStatus(`Deleted ${selected.type} probe ${selected.index + 1}. Save to update probe_in.dat.`);
+  }
+
+  async function saveProbes() {
+    const probes = editableProbes();
+    try {
+      const result = await postJson("/api/probes/save", {
+        case_dir: el.caseDir.value.trim(),
+        markers: probes.markers.map((probe) => ({ body: probe.body, reference: probe.reference })),
+        fluids: probes.fluids.map((probe) => ({ point: probe.point })),
+      });
+      state.probes = normalizeProbes(result);
+      addLoadedFile("probes", "probe_in.dat", "case probes");
+      setProbeLayerAvailable(true);
+      el.showProbes.checked = true;
+      renderLoadedFiles();
+      renderProbePanel();
+      recomputeBounds();
+      requestDraw();
+      setStatus(`Saved probe_in.dat: ${state.probes.markerCount} marker, ${state.probes.fluidCount} fluid.`);
+    } catch (err) {
+      setStatus(`Save probes failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  function refreshProbeCounts() {
+    if (!state.probes) return;
+    state.probes.markers.forEach((probe, index) => { probe.index = index + 1; });
+    state.probes.fluids.forEach((probe, index) => { probe.index = index + 1; });
+    state.probes.markerCount = state.probes.markers.length;
+    state.probes.fluidCount = state.probes.fluids.length;
+    state.probes.plottedMarkerCount = state.probes.markers.length;
+    state.probes.unmatchedMarkerCount = 0;
+  }
+
+  function updateProbeReport() {
+    if (!el.probeReport) return;
+    if (!state.probes) {
+      el.probeReport.textContent = "No probe_in.dat loaded. Generate probes or add one manually.";
+      return;
+    }
+    const lines = [
+      `marker probes : ${state.probes.markers.length}`,
+      `fluid probes  : ${state.probes.fluids.length}`,
+      `state         : ${state.probes.preview ? "preview (not saved)" : (state.probes.exists ? "loaded" : "new")}`,
+    ];
+    if (state.probes.generation) {
+      const generation = state.probes.generation;
+      lines.push(`slice error   : max ${formatShort(generation.max_plane_error || 0)}, mean ${formatShort(generation.mean_plane_error || 0)}`);
+      lines.push(`X error       : max ${formatShort(generation.max_x_error || 0)}, mean ${formatShort(generation.mean_x_error || 0)}`);
+    }
+    if (state.probeEditing) {
+      const selected = selectedProbe();
+      if (selected) lines.push(`editing       : ${selected.type} probe ${selected.index + 1} (orange)`);
+      if (state.probeTarget) {
+        lines.push(`target        : body ${state.probeTarget.body}, ${state.probeTarget.source} ${state.probeTarget.reference} (blue)`);
+      }
+    }
+    state.probes.errors.forEach((error) => lines.push(`warning       : ${error}`));
+    el.probeReport.textContent = lines.join("\n");
   }
 
   async function previewSetupSync() {
@@ -915,6 +1318,7 @@
     if (panelId === "meshPanel" && !meshControlsHaveValues()) {
       loadMeshInputControls();
     }
+    if (panelId !== "probePanel") stopProbeEditing();
   }
 
   function buildMeshControls() {
@@ -1583,6 +1987,10 @@
       fluidCount: Math.trunc(Number(probes && probes.fluid_count) || rawFluids.length),
       plottedMarkerCount: Math.trunc(Number(probes && probes.plotted_marker_count) || rawMarkers.length),
       unmatchedMarkerCount: Math.trunc(Number(probes && probes.unmatched_marker_count) || 0),
+      preview: !!(probes && probes.preview),
+      generation: probes && probes.generation && typeof probes.generation === "object"
+        ? probes.generation
+        : null,
       errors: Array.isArray(probes && probes.errors) ? probes.errors.map(String) : [],
       markers: rawMarkers.map((marker, markerIndex) => ({
         index: Math.trunc(Number(marker.index) || markerIndex + 1),
@@ -1605,6 +2013,7 @@
       el.probeLayerControl.classList.toggle("disabled", !available);
       el.probeLayerControl.title = available ? "" : "No probe_in.dat detected for this case";
     }
+    if (!available) el.showProbes.checked = false;
   }
 
   function vector3(value) {
@@ -1744,7 +2153,40 @@
       const p = projectPoint(rect, probe.point[0], probe.point[1], probe.point[2]);
       drawFluidProbe(ctx, p, "#0f7b68");
     });
+    const selected = state.probeEditing ? selectedProbe() : null;
+    if (selected) {
+      const p = projectPoint(rect, selected.probe.point[0], selected.probe.point[1], selected.probe.point[2]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#f59f00";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (state.probeEditing && state.probeTarget) {
+      const target = state.probeTarget;
+      const p = projectPoint(rect, target.point[0], target.point[1], target.point[2]);
+      drawProbeEditTarget(ctx, p, "#1976d2");
+    }
     ctx.restore();
+  }
+
+  function drawProbeEditTarget(ctx, point, color) {
+    const radius = 5;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y - radius);
+    ctx.lineTo(point.x + radius, point.y);
+    ctx.lineTo(point.x, point.y + radius);
+    ctx.lineTo(point.x - radius, point.y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(point.x - radius - 2, point.y);
+    ctx.lineTo(point.x + radius + 2, point.y);
+    ctx.moveTo(point.x, point.y - radius - 2);
+    ctx.lineTo(point.x, point.y + radius + 2);
+    ctx.stroke();
   }
 
   function drawProbeMarker(ctx, point, color) {

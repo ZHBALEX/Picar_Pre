@@ -18,7 +18,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from case_editor.case_project import CaseProject  # noqa: E402
-from case_editor.probe import read_probe_payload  # noqa: E402
+from case_editor.probe import (  # noqa: E402
+    generate_surface_marker_probes,
+    nearest_surface_node,
+    probe_spec_from_payload,
+    read_probe_payload,
+    resolve_marker_reference,
+    resolve_marker_probes,
+    write_probe_file,
+)
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
 from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
@@ -28,7 +36,7 @@ from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "setup26"
+CONSOLE_API_VERSION = "probe-edit2"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -89,6 +97,7 @@ def make_handler(default_case_dir: Path):
                         "control_sync": True,
                         "input_sync": True,
                         "setup_sync": True,
+                        "probe_edit": True,
                     })
                 elif path == "/api/report":
                     self._send_json(_case_report(_case_dir_from_query(query, default_case_dir)))
@@ -189,6 +198,14 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         out = case_dir / "amr_in.dat"
         out.write_text(_format_amr_payload(amr), encoding="utf-8")
         return {"ok": True, "path": str(out), "amr": _amr_payload(case_dir)}
+    if path == "/api/probes/generate":
+        return _generate_probe_payload(case_dir, payload)
+    if path == "/api/probes/save":
+        return _save_probe_payload(case_dir, payload)
+    if path == "/api/probes/snap":
+        return _snap_probe_payload(case_dir, payload)
+    if path == "/api/probes/resolve":
+        return _resolve_probe_payload(case_dir, payload)
     if path in {"/api/setup-sync/plan", "/api/input-sync/plan", "/api/control-sync/plan"}:
         return _setup_sync_payload(case_dir, payload, apply=False)
     if path in {"/api/setup-sync/apply", "/api/input-sync/apply", "/api/control-sync/apply"}:
@@ -368,6 +385,104 @@ def _probe_payload(case_dir: Path) -> dict[str, object]:
     surface_path = case_dir / "unstruc_surface_in.dat"
     bodies = read_surface(surface_path) if surface_path.exists() else []
     return read_probe_payload(case_dir / "probe_in.dat", bodies)
+
+
+def _generate_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        raise ValueError("Generate probes requires unstruc_surface_in.dat")
+    bodies = read_surface(surface_path)
+    body_id = int(payload.get("body_id", 1))
+    if body_id < 1 or body_id > len(bodies):
+        raise ValueError(f"body_id must be between 1 and {len(bodies)}")
+    markers = generate_surface_marker_probes(
+        bodies[body_id - 1],
+        body_id,
+        plane_axis=str(payload.get("plane_axis") or "z").lower(),
+        plane_value=float(payload.get("plane_value", 0.0)),
+        n_samples=int(payload.get("n_samples", 30)),
+        plane_tolerance=float(payload.get("plane_tolerance", 0.02)),
+        x_band_factor=float(payload.get("x_band_factor", 0.25)),
+        sides=str(payload.get("sides") or "both").lower(),
+        deduplicate=bool(payload.get("deduplicate", True)),
+    )
+
+    fluids: list[dict[str, object]] = []
+    if bool(payload.get("preserve_fluids", True)) and (case_dir / "probe_in.dat").exists():
+        existing = read_probe_payload(case_dir / "probe_in.dat", bodies)
+        fluids = list(existing.get("fluids", []))
+    spec = probe_spec_from_payload({"markers": markers, "fluids": fluids})
+    resolved, errors = resolve_marker_probes(spec, bodies)
+    generation = _probe_generation_summary(markers, str(payload.get("plane_axis") or "z").lower(), float(payload.get("plane_value", 0.0)))
+    for index, marker in enumerate(markers, start=1):
+        marker["index"] = index
+    return {
+        "ok": not errors,
+        "exists": False,
+        "path": str(case_dir / "probe_in.dat"),
+        "marker_count": len(markers),
+        "fluid_count": len(fluids),
+        "plotted_marker_count": len(resolved),
+        "unmatched_marker_count": max(0, len(markers) - len(resolved)),
+        "markers": markers,
+        "fluids": fluids,
+        "errors": errors,
+        "preview": True,
+        "generation": generation,
+    }
+
+
+def _save_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    spec = probe_spec_from_payload(payload)
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    bodies = read_surface(surface_path) if surface_path.exists() else []
+    _, marker_errors = resolve_marker_probes(spec, bodies)
+    if marker_errors:
+        raise ValueError("; ".join(marker_errors))
+    out = write_probe_file(case_dir / "probe_in.dat", spec)
+    result = read_probe_payload(out, bodies)
+    result["saved"] = True
+    return result
+
+
+def _snap_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        raise ValueError("Snap requires unstruc_surface_in.dat")
+    bodies = read_surface(surface_path)
+    body_id = int(payload.get("body_id", 1))
+    if body_id < 1 or body_id > len(bodies):
+        raise ValueError(f"body_id must be between 1 and {len(bodies)}")
+    point = payload.get("point")
+    if not isinstance(point, list) or len(point) != 3:
+        raise ValueError("point must contain X, Y, and Z")
+    snapped = nearest_surface_node(bodies[body_id - 1], [float(value) for value in point])
+    return {"ok": True, "body": body_id, **snapped}
+
+
+def _resolve_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        raise ValueError("Resolve requires unstruc_surface_in.dat")
+    bodies = read_surface(surface_path)
+    body_id = int(payload.get("body_id", 1))
+    if body_id < 1 or body_id > len(bodies):
+        raise ValueError(f"body_id must be between 1 and {len(bodies)}")
+    resolved = resolve_marker_reference(bodies[body_id - 1], int(payload.get("reference", 0)))
+    return {"ok": True, "body": body_id, **resolved}
+
+
+def _probe_generation_summary(markers: list[dict[str, object]], plane_axis: str, plane_value: float) -> dict[str, object]:
+    x_errors = [float(marker.get("x_error", 0.0)) for marker in markers]
+    plane_errors = [float(marker.get("plane_error", 0.0)) for marker in markers]
+    return {
+        "plane_axis": plane_axis,
+        "plane_value": float(plane_value),
+        "max_plane_error": max(plane_errors, default=0.0),
+        "mean_plane_error": float(np.mean(plane_errors)) if plane_errors else 0.0,
+        "max_x_error": max(x_errors, default=0.0),
+        "mean_x_error": float(np.mean(x_errors)) if x_errors else 0.0,
+    }
 
 
 def _amr_payload(case_dir: Path) -> dict[str, object]:

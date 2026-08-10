@@ -77,6 +77,10 @@ Console panels:
 - `Mesh`: edit mesh-input parameters while the right-side scene updates live;
   use `Save Input` to write `input.dat`, then `Generate XYZ` to write
   `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
+- `Probe`: generate upper/lower marker probes from a selected surface slice,
+  edit one marker or fluid probe at a time, and save `probe_in.dat`. Marker XYZ
+  edits snap to the nearest node on the selected body; fluid XYZ edits remain
+  exact coordinates.
 - `Fort`: inspect matched `fort.*` files and preview sampled prescribed motion
   against the current surface.
 
@@ -160,7 +164,12 @@ but rotation should rotate the stored motion vectors too.
 
 Optional solver probe input. The console detects this file when loading a case
 and draws marker probes as body-surface locations plus fluid probes as direct
-coordinate points. Marker probes are resolved through
+coordinate points. The `Probe` panel can also create a preview by sampling
+upper/lower surface nodes along X at a selected Y or Z slice. After generation,
+individual marker probes can be moved by entering a target XYZ (the editor snaps
+it to the nearest valid surface node), while fluid probes can be positioned
+directly. Nothing is written until `Save probe_in.dat` is selected. Marker
+probes are resolved through
 [case_editor/probe.py](case_editor/probe.py), which keeps the file-format logic
 outside the browser console code.
 

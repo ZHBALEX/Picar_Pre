@@ -58,7 +58,10 @@ one shared 3D scene. The default view is performance-oriented: surface points,
 mesh boundary, dense-region box, and coordinate axes/ticks. If the case contains
 `probe_in.dat`, the Setup panel enables a probe layer backed by
 `case_editor.probe`. Sampled full-grid and surface-triangle overlays are optional
-layers. The Geometry panel can import surface/STL files, and the Mesh panel can
+layers. The Probe panel previews automatic surface-node sampling, edits marker
+probes by body/reference or nearest-node XYZ snapping, edits fluid probes by
+exact XYZ, and writes `probe_in.dat` only when Save is selected. The Geometry
+panel can import surface/STL files, and the Mesh panel can
 edit mesh-input parameters, save `input.dat`, and generate `xgrid.dat`,
 `ygrid.dat`, and `zgrid.dat`. If the preferred port is already occupied, the
 launcher prints the next free local URL.

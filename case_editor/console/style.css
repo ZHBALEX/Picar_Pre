@@ -148,6 +148,17 @@ h2 {
   color: #44505c;
 }
 
+.grid label.check-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 18px;
+}
+
+.grid label.check-field input {
+  width: auto;
+}
+
 .grid input,
 .grid select,
 .field input[type="file"] {
@@ -277,6 +288,11 @@ button:hover,
 button.active {
   border-color: #176f83;
   background: #e8f4f6;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .dropzone {
