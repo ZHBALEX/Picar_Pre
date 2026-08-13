@@ -11,9 +11,16 @@ from case_editor.probe import (
     parse_probe_text,
     read_probe_payload,
     resolve_marker_reference,
+    step_surface_marker,
     write_probe_file,
 )
-from case_editor.run_picar_console import _generate_probe_payload, _resolve_probe_payload, _save_probe_payload, _snap_probe_payload
+from case_editor.run_picar_console import (
+    _generate_probe_payload,
+    _resolve_probe_payload,
+    _save_probe_payload,
+    _snap_probe_payload,
+    _step_probe_payload,
+)
 from geometry.unstructure_surface.surface import SurfaceBody, write_surface
 
 
@@ -144,6 +151,76 @@ def test_missing_branch_in_narrow_x_bin_uses_neighbouring_branch() -> None:
     assert upper["point"][1] > 0.0
 
 
+def test_populated_target_band_prevents_an_unnecessary_x_jump() -> None:
+    # The off-centre pair lies exactly on the slice and would win the weighted
+    # score alone.  The centred pair is still acceptably close to the slice, so
+    # it should be preferred to keep the X stations visually uniform.
+    nodes = np.asarray(
+        [
+            [1, -1.0, -1.0, 0.0],
+            [2, -1.0, 1.0, 0.0],
+            [3, -0.4, -1.0, 0.0],
+            [4, -0.4, 1.0, 0.0],
+            [5, 0.0, -1.0, 0.004],
+            [6, 0.0, 1.0, 0.004],
+            [7, 1.0, -1.0, 0.0],
+            [8, 1.0, 1.0, 0.0],
+        ],
+        dtype=float,
+    )
+    body = SurfaceBody(nodes=nodes, elems=np.empty((0, 4), dtype=int))
+
+    probes = generate_surface_marker_probes(
+        body,
+        1,
+        plane_axis="z",
+        plane_value=0.0,
+        n_samples=3,
+        plane_tolerance=0.02,
+        x_band_factor=0.25,
+        deduplicate=False,
+    )
+
+    middle = [probe for probe in probes if np.isclose(probe["target_x"], 0.0)]
+    assert {probe["reference"] for probe in middle} == {5, 6}
+    assert {probe["point"][0] for probe in middle} == {0.0}
+
+
+def test_both_sides_are_selected_as_an_x_aligned_pair() -> None:
+    # Independent scores prefer the plane-perfect upper node at x=-0.2 and the
+    # lower node at x=0.  Joint selection should instead use the acceptably close
+    # upper node at x=0 so the pair represents one cross-section station.
+    nodes = np.asarray(
+        [
+            [1, -1.0, -1.0, 0.0],
+            [2, -1.0, 1.0, 0.0],
+            [3, -0.2, 1.0, 0.0],
+            [4, 0.0, -1.0, 0.010],
+            [5, 0.0, 1.0, 0.014],
+            [6, 1.0, -1.0, 0.0],
+            [7, 1.0, 1.0, 0.0],
+        ],
+        dtype=float,
+    )
+    body = SurfaceBody(nodes=nodes, elems=np.empty((0, 4), dtype=int))
+
+    probes = generate_surface_marker_probes(
+        body,
+        1,
+        plane_axis="z",
+        plane_value=0.0,
+        n_samples=3,
+        plane_tolerance=0.02,
+        x_band_factor=0.25,
+        sides="both",
+        deduplicate=False,
+    )
+
+    middle = [probe for probe in probes if np.isclose(probe["target_x"], 0.0)]
+    assert {probe["reference"] for probe in middle} == {4, 5}
+    assert {probe["point"][0] for probe in middle} == {0.0}
+
+
 def test_probe_writer_roundtrips_marker_and_fluid_records(tmp_path: Path) -> None:
     path = tmp_path / "probe_in.dat"
     source = ProbeSpec(
@@ -185,6 +262,81 @@ def test_marker_reference_resolves_for_manual_target_highlight() -> None:
     result = resolve_marker_reference(_sample_body(), 120)
 
     assert result == {"reference": 120, "source": "node", "point": [0.0, 0.0, -1.0]}
+
+
+def test_surface_marker_steps_along_connected_nodes_in_screen_direction() -> None:
+    nodes = np.asarray(
+        [
+            [1, 0.0, 0.0, 0.0],
+            [2, 1.0, 0.0, 0.0],
+            [3, 0.0, 1.0, 0.0],
+            [4, -1.0, 0.0, 0.0],
+            [5, 0.0, -1.0, 0.0],
+        ],
+        dtype=float,
+    )
+    elems = np.asarray(
+        [[1, 1, 2, 3], [2, 1, 3, 4], [3, 1, 4, 5], [4, 1, 5, 2]],
+        dtype=int,
+    )
+    body = SurfaceBody(nodes=nodes, elems=elems)
+
+    expected = {"right": 2, "up": 3, "left": 4, "down": 5}
+    for direction, reference in expected.items():
+        result = step_surface_marker(
+            body,
+            1,
+            screen_right=[1.0, 0.0, 0.0],
+            screen_up=[0.0, 1.0, 0.0],
+            direction=direction,
+        )
+        assert result["reference"] == reference
+        assert result["source"] == "node"
+
+
+def test_surface_step_api_uses_case_topology(tmp_path: Path) -> None:
+    nodes = np.asarray(
+        [[10, 0.0, 0.0, 0.0], [20, 1.0, 0.0, 0.0], [30, 0.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    body = SurfaceBody(nodes=nodes, elems=np.asarray([[1, 10, 20, 30]], dtype=int))
+    write_surface(tmp_path / "unstruc_surface_in.dat", [body])
+
+    result = _step_probe_payload(
+        tmp_path,
+        {
+            "body_id": 1,
+            "reference": 10,
+            "direction": "right",
+            "screen_right": [1.0, 0.0, 0.0],
+            "screen_up": [0.0, 1.0, 0.0],
+        },
+    )
+
+    assert result["body"] == 1
+    assert result["reference"] == 20
+    assert result["point"] == [1.0, 0.0, 0.0]
+
+
+def test_surface_step_does_not_disguise_a_sideways_edge_as_down() -> None:
+    nodes = np.asarray(
+        [[1, 0.0, 0.0, 0.0], [2, 1.0, 0.0, -0.1], [3, 1.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    body = SurfaceBody(nodes=nodes, elems=np.asarray([[1, 1, 2, 3]], dtype=int))
+
+    try:
+        step_surface_marker(
+            body,
+            1,
+            screen_right=[1.0, 0.0, 0.0],
+            screen_up=[0.0, 0.0, 1.0],
+            direction="down",
+        )
+    except ValueError as error:
+        assert "try another view" in str(error)
+    else:
+        raise AssertionError("A nearly sideways edge must not be reported as screen-down")
 
 
 def test_console_probe_generate_snap_and_save_workflow(tmp_path: Path) -> None:

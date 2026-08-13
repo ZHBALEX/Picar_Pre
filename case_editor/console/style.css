@@ -148,6 +148,34 @@ h2 {
   color: #44505c;
 }
 
+.probe-step-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  grid-template-rows: repeat(3, 36px);
+  gap: 4px;
+  width: max-content;
+  align-items: center;
+  justify-items: stretch;
+}
+
+.probe-step-pad button {
+  padding: 4px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.probe-step-pad button[data-probe-step="up"] { grid-column: 2; grid-row: 1; }
+.probe-step-pad button[data-probe-step="left"] { grid-column: 1; grid-row: 2; }
+.probe-step-pad span {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 10px;
+  color: #5e6b78;
+  text-align: center;
+}
+.probe-step-pad button[data-probe-step="right"] { grid-column: 3; grid-row: 2; }
+.probe-step-pad button[data-probe-step="down"] { grid-column: 2; grid-row: 3; }
+
 .grid label.check-field {
   display: flex;
   align-items: center;

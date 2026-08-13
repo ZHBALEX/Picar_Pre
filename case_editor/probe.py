@@ -122,6 +122,84 @@ def resolve_marker_reference(body: SurfaceBody, reference: int) -> dict[str, obj
     }
 
 
+def step_surface_marker(
+    body: SurfaceBody,
+    reference: int,
+    *,
+    screen_right: list[float] | tuple[float, float, float],
+    screen_up: list[float] | tuple[float, float, float],
+    direction: str,
+) -> dict[str, object]:
+    """Move a node marker by one mesh edge in a screen-space direction."""
+    reference = int(reference)
+    if direction not in {"left", "right", "up", "down"}:
+        raise ValueError("direction must be left, right, up, or down")
+
+    node_rows = {int(row[0]): row[1:4] for row in body.nodes}
+    point = node_rows.get(reference)
+    if point is None:
+        raise ValueError("Surface arrow movement currently requires a node marker reference")
+
+    neighbours: set[int] = set()
+    for elem in body.elems:
+        node_ids = [int(value) for value in elem[1:4]]
+        if reference in node_ids:
+            neighbours.update(node_id for node_id in node_ids if node_id != reference)
+    candidates = [node_id for node_id in neighbours if node_id in node_rows]
+    if not candidates:
+        raise ValueError(f"Node marker {reference} has no connected surface neighbours")
+
+    right = _unit_vector(screen_right, "screen_right")
+    up = _unit_vector(screen_up, "screen_up")
+    candidate_points = np.asarray([node_rows[node_id] for node_id in candidates], dtype=float)
+    displacement = candidate_points - np.asarray(point, dtype=float)
+    horizontal = displacement @ right
+    vertical = displacement @ up
+    forward, lateral = {
+        "right": (horizontal, vertical),
+        "left": (-horizontal, vertical),
+        "up": (vertical, horizontal),
+        "down": (-vertical, horizontal),
+    }[direction]
+    screen_length = np.hypot(forward, lateral)
+    valid = (forward > max(float(screen_length.max()) * 1e-10, 1e-14)) & (screen_length > 0.0)
+    if not np.any(valid):
+        raise ValueError(f"Node marker {reference} has no connected neighbour toward screen {direction}")
+
+    valid_rows = np.flatnonzero(valid)
+    alignment = forward[valid_rows] / screen_length[valid_rows]
+    aligned = alignment >= 0.35
+    if not np.any(aligned):
+        raise ValueError(
+            f"Node marker {reference} has no sufficiently aligned surface edge toward screen {direction}; "
+            "try another view"
+        )
+    valid_rows = valid_rows[aligned]
+    alignment = alignment[aligned]
+    # Directional alignment is the main criterion. Prefer the shorter edge when
+    # two connected nodes project at essentially the same angle.
+    local = int(np.lexsort((screen_length[valid_rows], -alignment))[0])
+    selected = int(valid_rows[local])
+    node_id = int(candidates[selected])
+    selected_point = candidate_points[selected]
+    return {
+        "reference": node_id,
+        "source": "node",
+        "point": [float(value) for value in selected_point],
+        "direction": direction,
+    }
+
+
+def _unit_vector(values, name: str) -> np.ndarray:
+    vector = np.asarray(values, dtype=float)
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must contain three finite coordinates")
+    length = float(np.linalg.norm(vector))
+    if length <= 1e-14:
+        raise ValueError(f"{name} cannot be zero")
+    return vector / length
+
+
 def generate_surface_marker_probes(
     body: SurfaceBody,
     body_id: int,
@@ -208,18 +286,54 @@ def generate_surface_marker_probes(
         split_value = 0.5 * (float(context_values.min()) + float(context_values.max()))
         upper_candidates = context_rows[context_values >= split_value]
         lower_candidates = context_rows[context_values <= split_value]
-        x_scale = max(x_band, x_step * 0.5, numeric_tolerance)
-        # The slice coordinate is visually more sensitive than a small offset
-        # inside the X neighbourhood.  Keep X inside the local half-station
-        # context, then strongly prefer nodes that actually lie on the requested
-        # plane (64x squared weight at the full user tolerance).
-        plane_scale = max(float(plane_tolerance) * 0.125, numeric_tolerance)
-        upper_rows.append(
-            _closest_slice_row(points, plane_distance, upper_candidates, target_x, x_scale, plane_scale)
+        # The wider context is needed to identify both surface branches, but it
+        # should not make a probe jump past an otherwise populated target band.
+        # Prefer the user's narrow X band on each branch and widen only when
+        # that branch genuinely has no local node.
+        upper_candidates = _prefer_target_band(
+            points,
+            plane_distance,
+            upper_candidates,
+            target_x,
+            x_band,
+            plane_tolerance,
+            numeric_tolerance,
         )
-        lower_rows.append(
-            _closest_slice_row(points, plane_distance, lower_candidates, target_x, x_scale, plane_scale)
+        lower_candidates = _prefer_target_band(
+            points,
+            plane_distance,
+            lower_candidates,
+            target_x,
+            x_band,
+            plane_tolerance,
+            numeric_tolerance,
         )
+        # Score with the scales the user actually requested.  The wider
+        # half-station context is only for finding both branches; using it as the
+        # X score scale made populated stations jump toward plane-perfect but
+        # visibly off-centre nodes.  Likewise, plane_tolerance is a tolerance,
+        # not a near-zero target that should receive a 64x squared penalty.
+        x_scale = max(x_band, numeric_tolerance)
+        plane_scale = max(float(plane_tolerance) * 0.75, numeric_tolerance)
+        if sides == "both":
+            upper_row, lower_row = _closest_slice_pair(
+                points,
+                plane_distance,
+                upper_candidates,
+                lower_candidates,
+                target_x,
+                x_scale,
+                plane_scale,
+            )
+        else:
+            upper_row = _closest_slice_row(
+                points, plane_distance, upper_candidates, target_x, x_scale, plane_scale
+            )
+            lower_row = _closest_slice_row(
+                points, plane_distance, lower_candidates, target_x, x_scale, plane_scale
+            )
+        upper_rows.append(upper_row)
+        lower_rows.append(lower_row)
         upper_targets.append(float(target_x))
         lower_targets.append(float(target_x))
 
@@ -246,6 +360,28 @@ def generate_surface_marker_probes(
     ]
 
 
+def _prefer_target_band(
+    points: np.ndarray,
+    plane_distance: np.ndarray,
+    rows: np.ndarray,
+    target_x: float,
+    x_band: float,
+    plane_tolerance: float,
+    numeric_tolerance: float,
+) -> np.ndarray:
+    """Prefer the requested X band unless its slice quality is much worse."""
+    near = rows[
+        np.abs(points[rows, 0] - float(target_x))
+        <= float(x_band) + float(numeric_tolerance)
+    ]
+    if near.size == 0:
+        return rows
+    near_plane = float(plane_distance[near].min())
+    context_plane = float(plane_distance[rows].min())
+    allowed_penalty = max(float(plane_tolerance) * 0.25, float(numeric_tolerance))
+    return near if near_plane <= context_plane + allowed_penalty else rows
+
+
 def _closest_slice_row(
     points: np.ndarray,
     plane_distance: np.ndarray,
@@ -266,6 +402,43 @@ def _closest_slice_row(
     score = (dx / float(x_scale)) ** 2 + (plane_distance[rows] / float(plane_scale)) ** 2
     local = int(np.lexsort((dx, plane_distance[rows], score))[0])
     return int(rows[local])
+
+
+def _closest_slice_pair(
+    points: np.ndarray,
+    plane_distance: np.ndarray,
+    upper_rows: np.ndarray,
+    lower_rows: np.ndarray,
+    target_x: float,
+    x_scale: float,
+    plane_scale: float,
+) -> tuple[int, int]:
+    """Choose upper/lower jointly so a probe pair shares one X station."""
+    if upper_rows.size == 0 or lower_rows.size == 0:
+        raise ValueError("Could not find both sides of the requested surface slice")
+
+    upper_dx = np.abs(points[upper_rows, 0] - float(target_x))
+    lower_dx = np.abs(points[lower_rows, 0] - float(target_x))
+    upper_score = (upper_dx / float(x_scale)) ** 2 + (
+        plane_distance[upper_rows] / float(plane_scale)
+    ) ** 2
+    lower_score = (lower_dx / float(x_scale)) ** 2 + (
+        plane_distance[lower_rows] / float(plane_scale)
+    ) ** 2
+
+    pair_dx = np.abs(
+        points[upper_rows, 0, None] - points[lower_rows, 0][None, :]
+    )
+    # Independent station scores already pull both nodes toward target_x.  This
+    # additional half-weight term makes vertical pairing explicit without
+    # overwhelming slice accuracy when the mesh has staggered node rings.
+    score = (
+        upper_score[:, None]
+        + lower_score[None, :]
+        + 0.5 * (pair_dx / float(x_scale)) ** 2
+    )
+    upper_local, lower_local = np.unravel_index(int(np.argmin(score)), score.shape)
+    return int(upper_rows[upper_local]), int(lower_rows[lower_local])
 
 
 def read_probe_payload(path: str | Path, bodies: list[SurfaceBody] | None = None) -> dict[str, object]:

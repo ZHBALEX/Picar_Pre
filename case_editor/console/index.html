@@ -153,6 +153,13 @@
           <label>Y<input id="probeEditY" type="number" step="0.001"></label>
           <label>Z<input id="probeEditZ" type="number" step="0.001"></label>
         </div>
+        <div id="probeSurfaceStep" class="probe-step-pad" aria-label="Move marker along connected surface nodes">
+          <button type="button" data-probe-step="up" title="Move to the connected node above on screen">↑</button>
+          <button type="button" data-probe-step="left" title="Move to the connected node left on screen">←</button>
+          <span>Surface step</span>
+          <button type="button" data-probe-step="right" title="Move to the connected node right on screen">→</button>
+          <button type="button" data-probe-step="down" title="Move to the connected node below on screen">↓</button>
+        </div>
         <div class="actions">
           <button id="moveProbeToReference" type="button">Move to Reference</button>
           <button id="applyProbeEdit" type="button">Snap XYZ</button>
@@ -160,7 +167,7 @@
           <button id="addFluidProbe" type="button">Add Fluid</button>
           <button id="deleteProbe" type="button">Delete</button>
         </div>
-        <p class="hint">While editing, orange marks the current probe and blue marks the Body + reference target. Marker XYZ snaps to the nearest node; fluid XYZ is stored directly.</p>
+        <p class="hint">Surface arrows move a marker by one connected mesh edge in the current screen direction. Orange marks the current probe and blue marks the Body + reference target. Marker XYZ snaps to the nearest node; fluid XYZ is stored directly.</p>
 
         <h2>Probe File</h2>
         <div class="actions">

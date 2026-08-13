@@ -25,6 +25,7 @@ from case_editor.probe import (  # noqa: E402
     read_probe_payload,
     resolve_marker_reference,
     resolve_marker_probes,
+    step_surface_marker,
     write_probe_file,
 )
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
@@ -36,7 +37,7 @@ from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "probe-edit2"
+CONSOLE_API_VERSION = "probe-edit3"
 DENSE_UNIFORM_RATIO = 1.05
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
@@ -206,6 +207,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return _snap_probe_payload(case_dir, payload)
     if path == "/api/probes/resolve":
         return _resolve_probe_payload(case_dir, payload)
+    if path == "/api/probes/step":
+        return _step_probe_payload(case_dir, payload)
     if path in {"/api/setup-sync/plan", "/api/input-sync/plan", "/api/control-sync/plan"}:
         return _setup_sync_payload(case_dir, payload, apply=False)
     if path in {"/api/setup-sync/apply", "/api/input-sync/apply", "/api/control-sync/apply"}:
@@ -470,6 +473,24 @@ def _resolve_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[s
         raise ValueError(f"body_id must be between 1 and {len(bodies)}")
     resolved = resolve_marker_reference(bodies[body_id - 1], int(payload.get("reference", 0)))
     return {"ok": True, "body": body_id, **resolved}
+
+
+def _step_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        raise ValueError("Surface movement requires unstruc_surface_in.dat")
+    bodies = read_surface(surface_path)
+    body_id = int(payload.get("body_id", 1))
+    if body_id < 1 or body_id > len(bodies):
+        raise ValueError(f"body_id must be between 1 and {len(bodies)}")
+    result = step_surface_marker(
+        bodies[body_id - 1],
+        int(payload.get("reference", 0)),
+        screen_right=payload.get("screen_right", []),
+        screen_up=payload.get("screen_up", []),
+        direction=str(payload.get("direction") or ""),
+    )
+    return {"ok": True, "body": body_id, **result}
 
 
 def _probe_generation_summary(markers: list[dict[str, object]], plane_axis: str, plane_value: float) -> dict[str, object]:

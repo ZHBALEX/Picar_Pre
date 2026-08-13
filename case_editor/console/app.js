@@ -100,6 +100,7 @@
     probeEditX: document.getElementById("probeEditX"),
     probeEditY: document.getElementById("probeEditY"),
     probeEditZ: document.getElementById("probeEditZ"),
+    probeSurfaceStep: document.getElementById("probeSurfaceStep"),
     moveProbeToReference: document.getElementById("moveProbeToReference"),
     applyProbeEdit: document.getElementById("applyProbeEdit"),
     addMarkerProbe: document.getElementById("addMarkerProbe"),
@@ -222,6 +223,9 @@
     });
     el.probeEditBody.addEventListener("change", previewSelectedMarkerReference);
     el.probeEditReference.addEventListener("change", previewSelectedMarkerReference);
+    el.probeSurfaceStep.querySelectorAll("[data-probe-step]").forEach((button) => {
+      button.addEventListener("click", () => stepSelectedMarker(button.dataset.probeStep));
+    });
     el.moveProbeToReference.addEventListener("click", moveSelectedProbeToReference);
     el.applyProbeEdit.addEventListener("click", applySelectedProbePosition);
     el.addMarkerProbe.addEventListener("click", addMarkerProbe);
@@ -621,6 +625,10 @@
     if (items.length) el.probeEditIndex.value = String(Math.min(oldIndex, items.length - 1));
     el.probeEditIndex.disabled = !items.length;
     el.probeMarkerFields.style.display = type === "marker" ? "grid" : "none";
+    el.probeSurfaceStep.hidden = type !== "marker";
+    el.probeSurfaceStep.querySelectorAll("button").forEach((button) => {
+      button.disabled = !items.length;
+    });
     el.moveProbeToReference.hidden = type !== "marker";
     el.moveProbeToReference.disabled = !items.length || !state.probeTarget;
     el.applyProbeEdit.textContent = type === "marker" ? "Snap XYZ" : "Apply XYZ";
@@ -732,6 +740,49 @@
     recomputeBounds();
     requestDraw();
     setStatus(`Moved marker probe ${selected.index + 1} to body ${target.body}, ${target.source} ${target.reference}. Save to write probe_in.dat.`);
+  }
+
+  function probeScreenBasis() {
+    if (isPlaneView()) {
+      const axes = planeAxes(state.viewMode);
+      const right = [0, 0, 0];
+      const up = [0, 0, 0];
+      right[axes.u] = 1;
+      up[axes.v] = 1;
+      return { right, up };
+    }
+    const basis = cameraBasis();
+    return { right: basis.right.slice(), up: basis.up.slice() };
+  }
+
+  async function stepSelectedMarker(direction) {
+    const selected = selectedProbe();
+    if (!selected || selected.type !== "marker") return;
+    const basis = probeScreenBasis();
+    state.probeEditing = true;
+    try {
+      const result = await postJson("/api/probes/step", {
+        case_dir: el.caseDir.value.trim(),
+        body_id: selected.probe.body,
+        reference: selected.probe.reference,
+        direction,
+        screen_right: basis.right,
+        screen_up: basis.up,
+      });
+      selected.probe.body = result.body;
+      selected.probe.reference = result.reference;
+      selected.probe.source = result.source || "node";
+      selected.probe.point = vector3(result.point);
+      state.probeTarget = null;
+      state.probeResolveRequest += 1;
+      refreshProbeCounts();
+      renderProbePanel();
+      recomputeBounds();
+      requestDraw();
+      setStatus(`Moved marker probe ${selected.index + 1} one surface edge ${direction} to node ${result.reference}. Save to write probe_in.dat.`);
+    } catch (err) {
+      setStatus(`Surface step failed: ${cleanErrorMessage(err)}`);
+    }
   }
 
   async function generateProbePreview() {
