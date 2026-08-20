@@ -39,6 +39,7 @@ from motion.visualize import motion_points_for_frames  # noqa: E402
 STATIC_DIR = Path(__file__).resolve().parent / "console"
 CONSOLE_API_VERSION = "probe-edit3"
 DENSE_UNIFORM_RATIO = 1.05
+DENSE_SPACING_TOLERANCE = 0.02
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
 MESH_INPUT_CANDIDATES = (
     "mesh_input_twolayers.dat",
@@ -229,6 +230,17 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         project = SurfaceProject(case_dir)
         out, bodies = project.convert_stl([stl_path], append=bool(payload.get("append")))
         return {"ok": True, "stl_path": str(stl_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
+    if path == "/api/geometry/import-obj":
+        filename = Path(str(payload.get("filename") or "uploaded.obj")).name
+        data_b64 = str(payload.get("content_base64") or "")
+        if not data_b64:
+            raise ValueError("Missing OBJ content")
+        case_dir.mkdir(parents=True, exist_ok=True)
+        obj_path = case_dir / filename
+        obj_path.write_bytes(base64.b64decode(data_b64))
+        project = SurfaceProject(case_dir)
+        out, bodies = project.convert_obj([obj_path], append=bool(payload.get("append")))
+        return {"ok": True, "obj_path": str(obj_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
     if path == "/api/geometry/export-stl":
         output = str(payload.get("output") or "surface_export.stl")
         out, bodies = SurfaceProject(case_dir).export_stl(output=output, body_ids=_payload_body_ids(payload))
@@ -918,7 +930,7 @@ def _axis_params_from_grid(values) -> dict[str, float | int]:
             "right_stretch": 0,
         }
 
-    threshold = min_spacing + max(abs(min_spacing) * 1e-6, 1e-12)
+    threshold = min_spacing * (1.0 + DENSE_SPACING_TOLERANCE)
     best_start = 0
     best_end = 0
     run_start = -1

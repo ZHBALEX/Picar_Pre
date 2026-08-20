@@ -125,6 +125,30 @@ def test_console_infers_reference_two_layer_dense_region() -> None:
     assert axis["right_stretch"] == 31
 
 
+def test_console_infers_dense_region_from_rounded_grid_output() -> None:
+    values = make_axis_nodes(
+        length=30.0,
+        center_dense=20.5,
+        dense_length=3.0,
+        dense_count=900,
+        left_length_hint=0.0,
+        right_length_hint=0.0,
+        left_stretch_count=20,
+        left_uniform_count=0,
+        right_uniform_count=0,
+        right_stretch_count=20,
+        left_ratio=1.08,
+        right_ratio=1.08,
+    )
+    rounded_values = np.array([float(f"{value:.8f}") for value in values])
+
+    axis = _axis_params_from_grid(rounded_values)
+
+    assert np.isclose(axis["center"], 20.5, atol=0.02)
+    assert np.isclose(axis["dense_length"], 3.0, atol=0.02)
+    assert axis["dense_count"] >= 890
+
+
 def test_write_and_read_mesh(tmp_path: Path) -> None:
     mesh = generate_mesh(sample_mesh_params())
     write_mesh(tmp_path, mesh)

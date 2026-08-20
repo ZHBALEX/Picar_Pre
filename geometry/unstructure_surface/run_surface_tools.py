@@ -80,6 +80,12 @@ def parse_args() -> argparse.Namespace:
     convert.add_argument("--append", action="store_true", help="Append converted STL bodies to the existing surface.")
     convert.add_argument("--precision", type=int, default=8, help="Decimal precision before STL vertex deduplication.")
 
+    convert_obj = subparsers.add_parser("convert-obj", help="Convert OBJ files in the target directory to surface format.")
+    convert_obj.add_argument("obj", nargs="*", help="OBJ files. If omitted, all *.obj files in case-dir are used.")
+    convert_obj.add_argument("--output", default=None, help="Output filename/path. Defaults to surface-name in case-dir.")
+    convert_obj.add_argument("--append", action="store_true", help="Append converted OBJ bodies to the existing surface.")
+    convert_obj.add_argument("--precision", type=int, default=8, help="Decimal precision before OBJ vertex deduplication.")
+
     export_stl = subparsers.add_parser("export-stl", help="Export the target unstructured surface to STL.")
     export_stl.add_argument("--output", default=None, help="Output STL filename/path. Defaults to surface-name with .stl.")
     export_stl.add_argument("--body", type=int, action="append", help="1-based body id. Repeat to export selected bodies. Default: all.")
@@ -168,6 +174,16 @@ def main() -> None:
             precision=args.precision,
         )
         print_write_report("STL Conversion", project, out, len(bodies))
+        print(project.report(surface_path=out, bodies=bodies))
+
+    elif args.command == "convert-obj":
+        out, bodies = project.convert_obj(
+            obj_files=args.obj,
+            output=args.output,
+            append=args.append,
+            precision=args.precision,
+        )
+        print_write_report("OBJ Conversion", project, out, len(bodies))
         print(project.report(surface_path=out, bodies=bodies))
 
     elif args.command == "export-stl":

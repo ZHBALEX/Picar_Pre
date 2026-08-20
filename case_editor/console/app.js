@@ -2,9 +2,10 @@
   const MAX_SURFACE_POINTS = 35000;
   const MAX_SURFACE_TRIANGLES = 80000;
   const INTERACTIVE_SURFACE_TRIANGLES = 12000;
-  const MAX_GRID_LINES = 28;
+  const MAX_GRID_LINES = 48;
   const MAX_DRAWN_PROBES = 6000;
   const DENSE_UNIFORM_RATIO = 1.05;
+  const DENSE_SPACING_TOLERANCE = 0.02;
   const AMR_COLORS = ["#d62828", "#2f80ed", "#f59f00", "#7b2cbf", "#2b9348", "#d9480f"];
   const MESH_INPUT_FIELDS = [
     ["scale_ref", "float"], ["Lx", "float"], ["Ly", "float"], ["Lz", "float"],
@@ -353,7 +354,7 @@
 
   async function readFiles(files) {
     let loadedMeshInput = false;
-    let importedStlCount = 0;
+    let importedMeshCount = 0;
     for (const file of Array.from(files)) {
       try {
         const lower = file.name.toLowerCase();
@@ -362,12 +363,12 @@
           state.surface = parseSurface(text);
           addLoadedFile("surface", file.name, "dropped surface");
           state.pendingGeometryFile = file;
-        } else if (lower.endsWith(".stl")) {
+        } else if (lower.endsWith(".stl") || lower.endsWith(".obj")) {
           state.pendingGeometryFile = file;
-          addLoadedFile(`stl:${file.name}`, file.name, "importing STL");
+          addLoadedFile(`mesh:${file.name}`, file.name, `importing ${meshFileLabel(lower)}`);
           renderLoadedFiles();
-          if (await importGeometry(importedStlCount > 0, file)) {
-            importedStlCount += 1;
+          if (await importGeometry(importedMeshCount > 0, file)) {
+            importedMeshCount += 1;
           }
         } else if (isMeshInputName(lower)) {
           const text = await file.text();
@@ -467,7 +468,7 @@
       fillMeshControls(defaultMeshParams());
       state.meshControlsReady = true;
     }
-    if (id.startsWith("stl:") && state.pendingGeometryFile && id === `stl:${state.pendingGeometryFile.name}`) {
+    if (id.startsWith("mesh:") && state.pendingGeometryFile && id === `mesh:${state.pendingGeometryFile.name}`) {
       state.pendingGeometryFile = null;
     }
     state.loadedFiles = state.loadedFiles.filter((item) => item.id !== id);
@@ -1734,30 +1735,31 @@
   async function importGeometry(append, explicitFile = null) {
     const file = explicitFile || (el.geometryFile.files && el.geometryFile.files[0]) || state.pendingGeometryFile;
     if (!file) {
-      setStatus("Choose or drop a .stl or .dat file first.");
+      setStatus("Choose or drop a .stl, .obj, or .dat file first.");
       return false;
     }
     try {
       const lower = file.name.toLowerCase();
       if (lower.endsWith(".dat")) {
         if (append) {
-          setStatus("Append supports STL files. Use Import to replace the surface with a DAT file.");
+          setStatus("Append supports STL/OBJ files. Use Import to replace the surface with a DAT file.");
           return false;
         }
         setStatus(`Importing surface: ${file.name}`);
         const content = await file.text();
         await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
-      } else if (lower.endsWith(".stl")) {
-        setStatus(`Importing STL: ${file.name}`);
+      } else if (lower.endsWith(".stl") || lower.endsWith(".obj")) {
+        const label = meshFileLabel(lower);
+        setStatus(`Importing ${label}: ${file.name}`);
         const contentBase64 = await fileToBase64(file);
-        await postJson("/api/geometry/import-stl", {
+        await postJson(`/api/geometry/import-${label.toLowerCase()}`, {
           case_dir: el.caseDir.value.trim(),
           filename: file.name,
           content_base64: contentBase64,
           append,
         });
       } else {
-        setStatus("Geometry import supports .stl and .dat.");
+        setStatus("Geometry import supports .stl, .obj, and .dat.");
         return false;
       }
       await loadCase();
@@ -1927,6 +1929,10 @@
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  }
+
+  function meshFileLabel(lowerName) {
+    return lowerName.endsWith(".obj") ? "OBJ" : "STL";
   }
 
   function parseSurface(text) {
@@ -2283,12 +2289,41 @@
   function drawDenseRegion(ctx, rect) {
     const dense = state.mesh.denseBox || inferDenseBox();
     if (!dense) return;
+    if (isPlaneView() || Math.abs((dense.z1 ?? 0) - (dense.z0 ?? 0)) < 1e-12) {
+      drawDenseRegionPlane(ctx, rect, dense);
+      return;
+    }
     const zFallback = state.mesh.z && state.mesh.z.length ? [state.mesh.z[0], state.mesh.z[state.mesh.z.length - 1]] : [0, 0];
     const z0 = dense.z0 === dense.z1 ? zFallback[0] : dense.z0;
     const z1 = dense.z0 === dense.z1 ? zFallback[1] : dense.z1;
     const box = { x0: dense.x0, x1: dense.x1, y0: dense.y0, y1: dense.y1, z0, z1 };
     drawBoxFaces(ctx, rect, box, "rgba(42, 132, 122, 0.18)");
     drawBoxEdges(ctx, rect, box, "#1a786f", 1.4);
+  }
+
+  function drawDenseRegionPlane(ctx, rect, dense) {
+    const axes = planeAxes(isPlaneView() ? state.viewMode : "xy");
+    const d0 = dense[`${axisKey(axes.d)}0`] ?? state.bounds.min[axes.d];
+    const u0 = dense[`${axisKey(axes.u)}0`];
+    const u1 = dense[`${axisKey(axes.u)}1`];
+    const v0 = dense[`${axisKey(axes.v)}0`];
+    const v1 = dense[`${axisKey(axes.v)}1`];
+    if (![u0, u1, v0, v1].every(Number.isFinite)) return;
+    const points = [
+      planePoint(axes, u0, v0, d0),
+      planePoint(axes, u1, v0, d0),
+      planePoint(axes, u1, v1, d0),
+      planePoint(axes, u0, v1, d0),
+    ].map((point) => projectPoint(rect, point[0], point[1], point[2]));
+    ctx.fillStyle = "rgba(42, 132, 122, 0.18)";
+    ctx.strokeStyle = "#1a786f";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   function drawAmrRegions(ctx, rect) {
@@ -2331,7 +2366,7 @@
     if (!x || !y) return;
     const xs = sample(x, MAX_GRID_LINES);
     const ys = sample(y, MAX_GRID_LINES);
-    const zs = z && z.length ? sample(z, Math.min(18, MAX_GRID_LINES)) : [0];
+    const zs = z && z.length ? sample(z, Math.min(28, MAX_GRID_LINES)) : [0];
     ctx.strokeStyle = "rgba(47, 127, 193, 0.22)";
     ctx.lineWidth = 0.5;
     ys.forEach((yy) => zs.forEach((zz) => linePoints(ctx, rect, [x[0], yy, zz], [x[x.length - 1], yy, zz])));
@@ -2412,6 +2447,10 @@
 
   function axisName(index) {
     return ["X", "Y", "Z"][index] || "";
+  }
+
+  function axisKey(index) {
+    return ["x", "y", "z"][index] || "";
   }
 
   function drawFloorGrid(ctx, rect, box) {
@@ -2693,7 +2732,7 @@
     const minSpacing = Math.min(...spacing);
     const maxSpacing = Math.max(...spacing);
     if (maxSpacing / minSpacing <= DENSE_UNIFORM_RATIO) return [values[0], values[values.length - 1]];
-    const threshold = minSpacing + Math.max(Math.abs(minSpacing) * 1e-6, 1e-12);
+    const threshold = minSpacing * (1 + DENSE_SPACING_TOLERANCE);
     let bestStart = 0;
     let bestEnd = 0;
     let start = -1;

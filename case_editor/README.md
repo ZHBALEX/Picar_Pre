@@ -62,7 +62,7 @@ layers. The Probe panel previews automatic surface-node sampling, edits marker
 probes by body/reference or nearest-node XYZ snapping, edits fluid probes by
 exact XYZ, and moves node markers one connected surface edge at a time with
 screen-relative arrow buttons. It writes `probe_in.dat` only when Save is selected. The Geometry
-panel can import surface/STL files, and the Mesh panel can
+panel can import surface/STL/OBJ files, and the Mesh panel can
 edit mesh-input parameters, save `input.dat`, and generate `xgrid.dat`,
 `ygrid.dat`, and `zgrid.dat`. If the preferred port is already occupied, the
 launcher prints the next free local URL.
@@ -159,6 +159,12 @@ Convert STL files already inside the case directory:
 
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/test_case convert-stl
+```
+
+Convert OBJ files already inside the case directory:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/test_case convert-obj
 ```
 
 ### 3. Sync `canonical_body_in.dat`

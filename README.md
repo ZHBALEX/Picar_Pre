@@ -72,8 +72,8 @@ highlighted frame shows the selected motion state.
 Console panels:
 
 - `Setup`: load a case and control visualization layers.
-- `Geometry`: import `.stl` or `unstruc_surface_in.dat`, append STL bodies,
-  save the current surface file, and export triangulated surfaces back to STL.
+- `Geometry`: import `.stl`, `.obj`, or `unstruc_surface_in.dat`, append mesh
+  bodies, save the current surface file, and export triangulated surfaces back to STL.
 - `Mesh`: edit mesh-input parameters while the right-side scene updates live;
   use `Save Input` to write `input.dat`, then `Generate XYZ` to write
   `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`.
@@ -87,8 +87,8 @@ Console panels:
 
 The toolkit currently focuses on the solid/body workflow:
 
-- create `unstruc_surface_in.dat` from parametric shapes, STL files, transforms,
-  or combined surface files
+- create `unstruc_surface_in.dat` from parametric shapes, STL/OBJ files,
+  transforms, or combined surface files
 - keep `canonical_body_in.dat` synchronized with the surface body counts
 - generate and inspect `xgrid.dat`, `ygrid.dat`, and `zgrid.dat`
 - edit common `input.dat` values without rewriting the whole file format
@@ -103,7 +103,7 @@ case_editor/
   Case-level workflow for input.dat, canonical bodies, grids, surfaces, and validation.
 
 geometry/unstructure_surface/
-  Boundary-surface pipeline for unstruc_surface_in.dat, including STL conversion,
+  Boundary-surface pipeline for unstruc_surface_in.dat, including STL/OBJ conversion,
   parametric body generation, transforms, visualization, and a static browser editor.
 
 mesh/
@@ -267,6 +267,12 @@ Convert STL files already inside the case directory:
 
 ```powershell
 python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case convert-stl
+```
+
+Convert OBJ files already inside the case directory:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir case_editor/demo_case convert-obj
 ```
 
 Export a triangulated `unstruc_surface_in.dat` back to STL:
@@ -563,7 +569,7 @@ python -m mesh.run_mesh_tools --case-dir mesh/examples inspect
   elements.
 - Flat boundary curves with zero elements are supported for sketches and quick
   previews.
-- STL conversion creates 3D boundary surface triangles.
+- STL/OBJ conversion creates 3D boundary surface triangles.
 - Mesh count fields are treated as interval counts; written grid files contain
   `total intervals + 1` coordinate nodes.
 - If body node order, node count, or topology changes, any external files that

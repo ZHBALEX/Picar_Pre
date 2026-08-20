@@ -60,12 +60,12 @@
       <section id="geometryPanel" class="control-panel">
         <h2>Geometry</h2>
         <label class="field">
-          <span>STL / surface file</span>
-          <input id="geometryFile" type="file" accept=".stl,.dat">
+          <span>STL / OBJ / surface file</span>
+          <input id="geometryFile" type="file" accept=".stl,.obj,.dat">
         </label>
         <div class="actions">
           <button id="importGeometry" type="button">Import</button>
-          <button id="appendGeometry" type="button">Append STL</button>
+          <button id="appendGeometry" type="button">Append Mesh</button>
           <button id="exportStl" type="button">Export STL</button>
         </div>
         <h2>Bodies</h2>
@@ -85,7 +85,7 @@
           <button id="applyBodyTransform" type="button">Apply Body Transform</button>
           <button id="removeBodies" type="button">Remove Body</button>
         </div>
-        <p class="hint">STL import writes `unstruc_surface_in.dat`; DAT import saves the dropped surface directly.</p>
+        <p class="hint">STL/OBJ import writes `unstruc_surface_in.dat`; DAT import saves the dropped surface directly.</p>
       </section>
       <section id="meshPanel" class="control-panel">
         <h2>Mesh Setup</h2>
@@ -226,7 +226,7 @@
       <section class="dropzone" id="dropzone">
         <input id="fileInput" type="file" multiple>
         <strong>Drop files here</strong>
-        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, or drop STL to import</span>
+        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, or drop STL/OBJ to import</span>
       </section>
       <section>
         <h2>Loaded Files</h2>

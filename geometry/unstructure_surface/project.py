@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .modeling import make_parametric_body
-from .stl import stl_to_surface_body, surface_bodies_to_stl
+from .stl import obj_to_surface_body, stl_to_surface_body, surface_bodies_to_stl
 from .surface import (
     DEFAULT_CASE_SURFACE,
     SurfaceBody,
@@ -59,6 +59,10 @@ class SurfaceProject:
         pattern = "**/*.stl" if recursive else "*.stl"
         return sorted(self.case_dir.glob(pattern))
 
+    def obj_files(self, recursive: bool = False) -> list[Path]:
+        pattern = "**/*.obj" if recursive else "*.obj"
+        return sorted(self.case_dir.glob(pattern))
+
     def convert_stl(
         self,
         stl_files: list[str | Path] | None = None,
@@ -76,6 +80,26 @@ class SurfaceProject:
 
         bodies = self.load(required=False) if append else []
         bodies.extend(stl_to_surface_body(path, precision=precision) for path in stl_paths)
+        out = self.save(bodies, output=output)
+        return out, bodies
+
+    def convert_obj(
+        self,
+        obj_files: list[str | Path] | None = None,
+        output: str | Path | None = None,
+        append: bool = False,
+        precision: int = 8,
+    ) -> tuple[Path, list[SurfaceBody]]:
+        if obj_files is None or len(obj_files) == 0:
+            obj_paths = self.obj_files()
+        else:
+            obj_paths = [self._resolve_path(path) for path in obj_files]
+
+        if not obj_paths:
+            raise FileNotFoundError(f"No OBJ files found in {self.case_dir}")
+
+        bodies = self.load(required=False) if append else []
+        bodies.extend(obj_to_surface_body(path, precision=precision) for path in obj_paths)
         out = self.save(bodies, output=output)
         return out, bodies
 

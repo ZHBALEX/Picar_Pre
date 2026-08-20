@@ -83,6 +83,71 @@ def stl_to_surface_body(stl_file: str | Path, precision: int = 8) -> SurfaceBody
     return SurfaceBody(nodes=nodes, elems=elems)
 
 
+def obj_to_surface_body(obj_file: str | Path, precision: int = 8) -> SurfaceBody:
+    """Convert a Wavefront OBJ triangular/polygon mesh to one SurfaceBody."""
+    try:
+        import trimesh
+
+        mesh = trimesh.load_mesh(Path(obj_file), process=False)
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.faces)
+    except ModuleNotFoundError:
+        vertices, faces = _read_obj_mesh_fallback(Path(obj_file))
+
+    unique_vertices, inverse = np.unique(np.round(vertices, precision), axis=0, return_inverse=True)
+    remapped_faces = inverse[faces] + 1
+
+    nodes = np.zeros((len(unique_vertices), 4), dtype=float)
+    nodes[:, 0] = np.arange(1, len(unique_vertices) + 1)
+    nodes[:, 1:4] = unique_vertices
+
+    elems = np.zeros((len(remapped_faces), 4), dtype=int)
+    elems[:, 0] = np.arange(1, len(remapped_faces) + 1)
+    elems[:, 1:4] = remapped_faces
+
+    return SurfaceBody(nodes=nodes, elems=elems)
+
+
+def _read_obj_mesh_fallback(obj_file: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Read Wavefront OBJ vertices and polygon faces without optional trimesh."""
+    vertices: list[list[float]] = []
+    faces: list[list[int]] = []
+    with obj_file.open("r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if parts[0] == "v":
+                if len(parts) < 4:
+                    raise ValueError(f"OBJ vertex has fewer than 3 coordinates: {obj_file}")
+                vertices.append([float(value) for value in parts[1:4]])
+            elif parts[0] == "f":
+                face = [_parse_obj_face_index(token, len(vertices), obj_file) for token in parts[1:]]
+                if len(face) < 3:
+                    raise ValueError(f"OBJ face has fewer than 3 vertices: {obj_file}")
+                for idx in range(1, len(face) - 1):
+                    faces.append([face[0], face[idx], face[idx + 1]])
+
+    if not vertices:
+        raise ValueError(f"No OBJ vertices found in {obj_file}")
+    if not faces:
+        raise ValueError(f"No OBJ faces found in {obj_file}")
+    return np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int)
+
+
+def _parse_obj_face_index(token: str, vertex_count: int, obj_file: Path) -> int:
+    raw = token.split("/", 1)[0]
+    if raw == "":
+        raise ValueError(f"OBJ face is missing a vertex index: {obj_file}")
+    index = int(raw)
+    if index < 0:
+        index = vertex_count + index + 1
+    if index < 1 or index > vertex_count:
+        raise ValueError(f"OBJ face index {raw} is out of range in {obj_file}")
+    return index - 1
+
+
 def _read_stl_mesh_fallback(stl_file: Path) -> tuple[np.ndarray, np.ndarray]:
     """Read ASCII or binary STL without optional trimesh dependency."""
     data = stl_file.read_bytes()

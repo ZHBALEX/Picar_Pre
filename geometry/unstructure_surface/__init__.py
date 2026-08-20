@@ -38,6 +38,7 @@ from .project import SurfaceProject
 from .stl import (
     cut_stl_with_box,
     mesh_report,
+    obj_to_surface_body,
     stl_to_surface_body,
     surface_bodies_to_stl,
     surface_bodies_to_trimesh,
@@ -97,6 +98,7 @@ __all__ = [
     "make_parametric_body",
     "make_rectangle_2d",
     "mesh_report",
+    "obj_to_surface_body",
     "stl_to_surface_body",
     "surface_bodies_to_stl",
     "surface_bodies_to_trimesh",

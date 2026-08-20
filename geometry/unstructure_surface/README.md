@@ -2,8 +2,9 @@
 
 This folder contains the unified preprocessing pipeline for Picar
 `unstruc_surface_in.dat` files. The design is target-directory based: load a
-case directory once, then inspect, convert STL files, generate simple parametric
-bodies, transform bodies, write the surface file, and visualize results.
+case directory once, then inspect, convert STL/OBJ files, generate simple
+parametric bodies, transform bodies, write the surface file, and visualize
+results.
 
 The style follows the same high-level idea used by `pyvicar`: create a case-like
 context around a directory, then call operations on that context instead of
@@ -19,7 +20,7 @@ passing file paths into every low-level function.
   Target-directory workflow: `SurfaceProject(case_dir)`.
 
 - `stl.py`
-  STL conversion and box cutting helpers.
+  STL/OBJ conversion and STL box cutting helpers.
 
 - `modeling.py`
   Simple parametric body generation: circle, ellipse, rectangle, NACA 4-digit.
@@ -111,7 +112,25 @@ Append converted STL bodies to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case convert-stl wing.stl --append
 ```
 
-### 3. Export a Surface to STL
+### 3. Convert OBJ Files in the Target Directory
+
+If OBJ files are in the target directory, no OBJ path is needed:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case convert-obj
+```
+
+Convert selected OBJ files:
+
+```powershell
+python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case convert-obj body.obj fin.obj
+```
+
+OBJ polygon faces are triangulated with a fan split. OBJ texture coordinates,
+normals, materials, and object/group names are ignored; only vertex positions
+and faces are written to `unstruc_surface_in.dat`.
+
+### 4. Export a Surface to STL
 
 Export the target `unstruc_surface_in.dat` to STL:
 
@@ -129,7 +148,7 @@ Only triangulated 3D surfaces can be exported to STL. Flat 2D boundary files
 with `elems = 0` must first be generated with `--thickness` so triangle
 elements exist.
 
-### 4. Combine Existing Surface Files
+### 5. Combine Existing Surface Files
 
 Combine separate surface files into one multi-body `unstruc_surface_in.dat`:
 
@@ -146,7 +165,7 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case
 Relative input paths are resolved from the current working directory first, then
 from `--case-dir`.
 
-### 5. Generate a Simple Parametric Body
+### 6. Generate a Simple Parametric Body
 
 Generate an ellipse:
 
@@ -218,7 +237,7 @@ Append generated body to an existing surface:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case generate circle --param radius=0.1 --append
 ```
 
-### 6. Transform Existing Surface Bodies
+### 7. Transform Existing Surface Bodies
 
 Transform all bodies:
 
@@ -238,7 +257,7 @@ Write transformed output to a new file:
 python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case transform --body 1 --translate 0.1 0 0 --output unstruc_surface_shifted.dat
 ```
 
-### 7. Visualize
+### 8. Visualize
 
 Show all triangle meshes:
 
@@ -300,6 +319,17 @@ from geometry.unstructure_surface import SurfaceProject
 
 project = SurfaceProject("path/to/case")
 out, bodies = project.convert_stl()
+print(out)
+print(len(bodies))
+```
+
+### Convert OBJ Files in a Directory
+
+```python
+from geometry.unstructure_surface import SurfaceProject
+
+project = SurfaceProject("path/to/case")
+out, bodies = project.convert_obj()
 print(out)
 print(len(bodies))
 ```
@@ -525,7 +555,7 @@ python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/stl_
 - Flat parametric bodies have zero elements when `--thickness` is not used.
 - Solver-style 2D cases should use `--thickness` with `--param layers=3` to
   create a thin side-wall surface like `example/run_case_2D`.
-- STL conversion writes STL boundary surface triangles.
+- STL/OBJ conversion writes boundary surface triangles.
 - `--thickness` creates a side-wall surface from an ordered 2D boundary; it does
   not add interior volume points.
 - If node order, node count, or topology changes, any external solver inputs
