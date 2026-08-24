@@ -166,7 +166,10 @@ but rotation should rotate the stored motion vectors too.
 Optional solver probe input. The console detects this file when loading a case
 and draws marker probes as body-surface locations plus fluid probes as direct
 coordinate points. The `Probe` panel can also create a preview by sampling
-upper/lower surface nodes along X at a selected Y or Z slice. After generation,
+upper/lower surface nodes along X at a selected Y or Z slice; endpoint sampling
+can be disabled to leave equal X margins before the first and after the last
+probe. Loaded and generated probes report slice error plus probe-spacing
+diagnostics in the panel. After generation,
 individual marker probes can be moved by entering a target XYZ (the editor snaps
 it to the nearest valid surface node), or by stepping to a triangle-connected
 neighbour in the current screen direction, while fluid probes can be positioned
@@ -469,6 +472,13 @@ Visualize motion envelopes:
 ```powershell
 python motion/run_motion_tools.py --case-dir example/run_case_2D view 2d --body 1 --frame 240 --samples 18 --save body1_motion.png --no-show
 python motion/run_motion_tools.py --case-dir example/run_case view 3d --body 4 --frame 240 --samples 8 --save body4_motion.png --no-show
+```
+
+Export a cycle-averaged undeformed surface from a deformed surface plus matching
+`fort.*` files:
+
+```powershell
+python motion/run_motion_tools.py --case-dir path/to/case export-undeformed --output unstruc_surface_undeformed.dat
 ```
 
 Fit harmonic motion equations:

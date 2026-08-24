@@ -61,7 +61,9 @@ mesh boundary, dense-region box, and coordinate axes/ticks. If the case contains
 layers. The Probe panel previews automatic surface-node sampling, edits marker
 probes by body/reference or nearest-node XYZ snapping, edits fluid probes by
 exact XYZ, and moves node markers one connected surface edge at a time with
-screen-relative arrow buttons. It writes `probe_in.dat` only when Save is selected. The Geometry
+screen-relative arrow buttons. Automatic sampling can include the surface ends
+or inset the first/last probe, and loaded probes report slice/spacing diagnostics.
+It writes `probe_in.dat` only when Save is selected. The Geometry
 panel can import surface/STL/OBJ files, and the Mesh panel can
 edit mesh-input parameters, save `input.dat`, and generate `xgrid.dat`,
 `ygrid.dat`, and `zgrid.dat`. If the preferred port is already occupied, the

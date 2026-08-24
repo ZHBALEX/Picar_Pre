@@ -211,6 +211,7 @@ def generate_surface_marker_probes(
     x_band_factor: float = 0.25,
     sides: str = "both",
     deduplicate: bool = True,
+    include_endpoints: bool = True,
 ) -> list[dict[str, object]]:
     """Sample upper/lower surface nodes at uniform X targets on one slice.
 
@@ -261,8 +262,16 @@ def generate_surface_marker_probes(
     slice_points = points[slice_rows]
     xmin = float(slice_points[:, 0].min())
     xmax = float(slice_points[:, 0].max())
-    targets = np.linspace(xmin, xmax, n_samples)
-    x_step = (xmax - xmin) / max(n_samples - 1, 1)
+    if include_endpoints:
+        targets = np.linspace(xmin, xmax, n_samples)
+    else:
+        targets = np.linspace(xmin, xmax, n_samples + 2)[1:-1]
+    if len(targets) > 1:
+        x_step = float(np.mean(np.diff(targets)))
+    elif include_endpoints:
+        x_step = xmax - xmin
+    else:
+        x_step = 0.5 * (xmax - xmin)
     x_band = max(x_step * float(x_band_factor), np.finfo(float).eps)
 
     upper_rows: list[int] = []
@@ -473,6 +482,173 @@ def read_probe_payload(path: str | Path, bodies: list[SurfaceBody] | None = None
             for index, (x, y, z) in enumerate(spec.fluid_points, start=1)
         ],
         "errors": errors,
+        "layout": summarize_probe_layout(markers),
+    }
+
+
+def summarize_probe_layout(
+    markers: list[dict[str, object]],
+    *,
+    plane_axis: str | None = None,
+    plane_value: float | None = None,
+) -> dict[str, object]:
+    """Summarize marker-probe spacing and slice quality from resolved points."""
+    points = _marker_points(markers)
+    if points.size == 0:
+        return {
+            "marker_count": 0,
+            "run_count": 0,
+            "runs": [],
+        }
+
+    inferred_axis = _infer_probe_plane_axis(points) if plane_axis is None else plane_axis.lower()
+    if inferred_axis not in {"y", "z"}:
+        raise ValueError("plane_axis must be 'y' or 'z'")
+    plane_index = 1 if inferred_axis == "y" else 2
+    resolved_plane_value = (
+        float(np.median(points[:, plane_index]))
+        if plane_value is None
+        else float(plane_value)
+    )
+    plane_errors = np.abs(points[:, plane_index] - resolved_plane_value)
+    runs = _probe_marker_runs(markers)
+    x_spacings: list[float] = []
+    point_spacings: list[float] = []
+    run_payloads: list[dict[str, object]] = []
+
+    for run_index, run in enumerate(runs, start=1):
+        run_points = _marker_points(run)
+        run_item: dict[str, object] = {
+            "body": int(run[0].get("body", 0)) if run else 0,
+            "run": run_index,
+            "count": len(run),
+        }
+        if len(run_points) >= 2:
+            dx = np.diff(run_points[:, 0])
+            ds = np.linalg.norm(np.diff(run_points, axis=0), axis=1)
+            x_spacings.extend(float(abs(value)) for value in dx)
+            point_spacings.extend(float(value) for value in ds)
+            run_item.update(
+                {
+                    "min_x_spacing": float(np.min(np.abs(dx))),
+                    "mean_x_spacing": float(np.mean(np.abs(dx))),
+                    "max_x_spacing": float(np.max(np.abs(dx))),
+                    "min_probe_spacing": float(np.min(ds)),
+                    "mean_probe_spacing": float(np.mean(ds)),
+                    "max_probe_spacing": float(np.max(ds)),
+                }
+            )
+        run_payloads.append(run_item)
+
+    x_errors = [float(marker["x_error"]) for marker in markers if "x_error" in marker]
+    plane_meta_errors = [float(marker["plane_error"]) for marker in markers if "plane_error" in marker]
+    pair_differences = _probe_pair_x_differences(runs)
+    layout: dict[str, object] = {
+        "marker_count": len(markers),
+        "run_count": len(runs),
+        "runs": run_payloads,
+        "plane_axis": inferred_axis,
+        "plane_value": resolved_plane_value,
+        "max_plane_error": float(np.max(plane_errors)),
+        "mean_plane_error": float(np.mean(plane_errors)),
+        "has_target_errors": bool(x_errors or plane_meta_errors),
+    }
+    if plane_meta_errors:
+        layout["max_plane_error"] = max(plane_meta_errors)
+        layout["mean_plane_error"] = float(np.mean(plane_meta_errors))
+    if x_errors:
+        layout["max_x_error"] = max(x_errors)
+        layout["mean_x_error"] = float(np.mean(x_errors))
+    layout.update(_spacing_stats("x_spacing", x_spacings))
+    layout.update(_spacing_stats("probe_spacing", point_spacings))
+    layout.update(_spacing_difference_stats("x_spacing_difference", x_spacings))
+    layout.update(_spacing_difference_stats("probe_spacing_difference", point_spacings))
+    layout.update(_spacing_stats("pair_x_difference", pair_differences))
+    return layout
+
+
+def _marker_points(markers: list[dict[str, object]]) -> np.ndarray:
+    points = []
+    for marker in markers:
+        point = marker.get("point")
+        if isinstance(point, (list, tuple)) and len(point) == 3:
+            values = [float(value) for value in point]
+            if all(np.isfinite(value) for value in values):
+                points.append(values)
+    return np.asarray(points, dtype=float).reshape((-1, 3))
+
+
+def _infer_probe_plane_axis(points: np.ndarray) -> str:
+    y_span = float(np.ptp(points[:, 1]))
+    z_span = float(np.ptp(points[:, 2]))
+    return "y" if y_span <= z_span else "z"
+
+
+def _probe_marker_runs(markers: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    grouped: dict[int, list[dict[str, object]]] = {}
+    for marker in markers:
+        grouped.setdefault(int(marker.get("body", 0)), []).append(marker)
+
+    runs: list[list[dict[str, object]]] = []
+    for body_markers in grouped.values():
+        points = _marker_points(body_markers)
+        if points.size == 0:
+            continue
+        tolerance = max(float(np.ptp(points[:, 0])) * 1e-9, 1e-12)
+        current: list[dict[str, object]] = []
+        previous_x: float | None = None
+        for marker in body_markers:
+            point = marker.get("point")
+            if not isinstance(point, (list, tuple)) or len(point) != 3:
+                continue
+            x_value = float(point[0])
+            if current and previous_x is not None and x_value < previous_x - tolerance:
+                runs.append(current)
+                current = []
+            current.append(marker)
+            previous_x = x_value
+        if current:
+            runs.append(current)
+    return runs
+
+
+def _probe_pair_x_differences(runs: list[list[dict[str, object]]]) -> list[float]:
+    differences: list[float] = []
+    by_body: dict[int, list[list[dict[str, object]]]] = {}
+    for run in runs:
+        if run:
+            by_body.setdefault(int(run[0].get("body", 0)), []).append(run)
+    for body_runs in by_body.values():
+        for first, second in zip(body_runs[::2], body_runs[1::2]):
+            if len(first) != len(second):
+                continue
+            first_points = _marker_points(first)
+            second_points = _marker_points(second)
+            if len(first_points) != len(second_points):
+                continue
+            differences.extend(float(value) for value in np.abs(first_points[:, 0] - second_points[:, 0]))
+    return differences
+
+
+def _spacing_stats(prefix: str, values: list[float]) -> dict[str, object]:
+    if not values:
+        return {}
+    array = np.asarray(values, dtype=float)
+    return {
+        f"min_{prefix}": float(np.min(array)),
+        f"mean_{prefix}": float(np.mean(array)),
+        f"max_{prefix}": float(np.max(array)),
+    }
+
+
+def _spacing_difference_stats(prefix: str, values: list[float]) -> dict[str, object]:
+    if len(values) < 2:
+        return {}
+    array = np.asarray(values, dtype=float)
+    difference = np.abs(array - float(np.mean(array)))
+    return {
+        f"mean_{prefix}": float(np.mean(difference)),
+        f"max_{prefix}": float(np.max(difference)),
     }
 
 

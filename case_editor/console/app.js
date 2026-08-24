@@ -92,6 +92,7 @@
     probeBandFactor: document.getElementById("probeBandFactor"),
     probeSides: document.getElementById("probeSides"),
     probeDeduplicate: document.getElementById("probeDeduplicate"),
+    probeIncludeEndpoints: document.getElementById("probeIncludeEndpoints"),
     generateProbes: document.getElementById("generateProbes"),
     probeEditType: document.getElementById("probeEditType"),
     probeEditIndex: document.getElementById("probeEditIndex"),
@@ -123,6 +124,8 @@
     fortMode: document.getElementById("fortMode"),
     previewFort: document.getElementById("previewFort"),
     clearFort: document.getElementById("clearFort"),
+    fortUndeformedOutput: document.getElementById("fortUndeformedOutput"),
+    exportFortUndeformed: document.getElementById("exportFortUndeformed"),
   };
 
   const state = {
@@ -238,6 +241,7 @@
     el.applySetupSync.addEventListener("click", applySetupSync);
     el.previewFort.addEventListener("click", previewFortMotion);
     el.clearFort.addEventListener("click", clearFortMotion);
+    el.exportFortUndeformed.addEventListener("click", exportFortUndeformed);
     el.scaleRef.addEventListener("input", previewMeshFromControls);
     el.relax.addEventListener("input", previewMeshFromControls);
     window.addEventListener("resize", requestDraw);
@@ -802,6 +806,7 @@
         x_band_factor: Math.max(0.001, numValue(el.probeBandFactor, 0.25)),
         sides: el.probeSides.value || "both",
         deduplicate: el.probeDeduplicate.checked,
+        include_endpoints: el.probeIncludeEndpoints.checked,
         preserve_fluids: true,
       });
       state.probes = normalizeProbes(result);
@@ -957,6 +962,8 @@
     state.probes.fluidCount = state.probes.fluids.length;
     state.probes.plottedMarkerCount = state.probes.markers.length;
     state.probes.unmatchedMarkerCount = 0;
+    state.probes.generation = null;
+    state.probes.layout = null;
   }
 
   function updateProbeReport() {
@@ -971,9 +978,9 @@
       `state         : ${state.probes.preview ? "preview (not saved)" : (state.probes.exists ? "loaded" : "new")}`,
     ];
     if (state.probes.generation) {
-      const generation = state.probes.generation;
-      lines.push(`slice error   : max ${formatShort(generation.max_plane_error || 0)}, mean ${formatShort(generation.mean_plane_error || 0)}`);
-      lines.push(`X error       : max ${formatShort(generation.max_x_error || 0)}, mean ${formatShort(generation.mean_x_error || 0)}`);
+      appendProbeLayoutLines(lines, state.probes.generation);
+    } else if (state.probes.layout) {
+      appendProbeLayoutLines(lines, state.probes.layout);
     }
     if (state.probeEditing) {
       const selected = selectedProbe();
@@ -984,6 +991,30 @@
     }
     state.probes.errors.forEach((error) => lines.push(`warning       : ${error}`));
     el.probeReport.textContent = lines.join("\n");
+  }
+
+  function appendProbeLayoutLines(lines, layout) {
+    if (!layout) return;
+    if (layout.plane_axis) {
+      lines.push(`slice plane   : ${layout.plane_axis}=${formatShort(layout.plane_value || 0)}`);
+    }
+    if (isFiniteNumber(layout.max_plane_error)) {
+      lines.push(`slice error   : max ${formatShort(layout.max_plane_error)}, mean ${formatShort(layout.mean_plane_error || 0)}`);
+    }
+    if (layout.has_target_errors && isFiniteNumber(layout.max_x_error)) {
+      lines.push(`X error       : max ${formatShort(layout.max_x_error)}, mean ${formatShort(layout.mean_x_error || 0)}`);
+    } else if (isFiniteNumber(layout.max_x_spacing_difference)) {
+      lines.push(`X spacing diff: max ${formatShort(layout.max_x_spacing_difference)}, mean ${formatShort(layout.mean_x_spacing_difference || 0)}`);
+    }
+    if (isFiniteNumber(layout.mean_x_spacing)) {
+      lines.push(`X spacing     : min ${formatShort(layout.min_x_spacing)}, mean ${formatShort(layout.mean_x_spacing)}, max ${formatShort(layout.max_x_spacing)}`);
+    }
+    if (isFiniteNumber(layout.mean_probe_spacing)) {
+      lines.push(`probe spacing : min ${formatShort(layout.min_probe_spacing)}, mean ${formatShort(layout.mean_probe_spacing)}, max ${formatShort(layout.max_probe_spacing)}`);
+    }
+    if (isFiniteNumber(layout.max_pair_x_difference)) {
+      lines.push(`pair X diff   : max ${formatShort(layout.max_pair_x_difference)}, mean ${formatShort(layout.mean_pair_x_difference || 0)}`);
+    }
   }
 
   async function previewSetupSync() {
@@ -1110,6 +1141,27 @@
     updateStats();
   }
 
+  async function exportFortUndeformed() {
+    try {
+      await requireFortUndeformedApi();
+      const fortStart = state.fort && state.fort.fort_start ? state.fort.fort_start : 41;
+      const result = await postJson("/api/fort/export-undeformed", {
+        case_dir: el.caseDir.value.trim(),
+        output: (el.fortUndeformedOutput.value || "unstruc_surface_undeformed.dat").trim(),
+        fort_start: fortStart,
+        component_order: el.fortOrder.value || "xyz",
+        motion_mode: el.fortMode.value || "velocity",
+      });
+      const stats = (result.stats || []).map((item) => (
+        `Body ${item.body}: ${item.frames} frames, drift max=${formatShort(item.max_cycle_drift)}, offset max=${formatShort(item.max_surface_offset)}`
+      ));
+      const detail = stats.length ? `\n${stats.join("\n")}` : "";
+      setStatus(`Exported undeformed surface:\n${result.path}${detail}`);
+    } catch (err) {
+      setStatus(`Export undeformed failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
   async function previewFortBody(bodyId) {
     if (!Number.isFinite(bodyId) || bodyId <= 0) {
       setStatus("Invalid fort body id.");
@@ -1214,6 +1266,13 @@
     const health = await fetchJson("/api/health");
     if (!health.fort_preview) {
       throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before previewing fort motion.");
+    }
+  }
+
+  async function requireFortUndeformedApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.fort_undeformed) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before exporting undeformed geometry.");
     }
   }
 
@@ -2048,6 +2107,9 @@
       generation: probes && probes.generation && typeof probes.generation === "object"
         ? probes.generation
         : null,
+      layout: probes && probes.layout && typeof probes.layout === "object"
+        ? probes.layout
+        : null,
       errors: Array.isArray(probes && probes.errors) ? probes.errors.map(String) : [],
       markers: rawMarkers.map((marker, markerIndex) => ({
         index: Math.trunc(Number(marker.index) || markerIndex + 1),
@@ -2807,6 +2869,10 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return "0";
     return Number(number.toPrecision(5)).toString();
+  }
+
+  function isFiniteNumber(value) {
+    return Number.isFinite(Number(value));
   }
 
   function escapeHtml(value) {

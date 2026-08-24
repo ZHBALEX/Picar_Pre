@@ -131,6 +131,7 @@
           </select></label>
           <label class="check-field"><input id="probeDeduplicate" type="checkbox" checked> Remove duplicates</label>
         </div>
+        <label class="check-field"><input id="probeIncludeEndpoints" type="checkbox" checked> Include endpoints</label>
         <div class="actions">
           <button id="generateProbes" type="button">Generate Preview</button>
         </div>
@@ -221,6 +222,10 @@
           <button id="previewFort" type="button">Preview Motion</button>
           <button id="clearFort" type="button">Clear Motion</button>
         </div>
+        <label>Undeformed output<input id="fortUndeformedOutput" type="text" value="unstruc_surface_undeformed.dat"></label>
+        <div class="actions">
+          <button id="exportFortUndeformed" type="button">Export Undeformed</button>
+        </div>
         <p class="hint">Gray points are sampled fort snapshots; red is the selected frame.</p>
       </section>
       <section class="dropzone" id="dropzone">
@@ -258,6 +263,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=probe2"></script>
+  <script src="app.js?v=fort-undeformed1"></script>
 </body>
 </html>

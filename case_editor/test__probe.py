@@ -11,6 +11,7 @@ from case_editor.probe import (
     parse_probe_text,
     read_probe_payload,
     resolve_marker_reference,
+    summarize_probe_layout,
     step_surface_marker,
     write_probe_file,
 )
@@ -54,6 +55,32 @@ def test_generate_surface_probes_uses_real_node_ids() -> None:
 
     assert [probe["reference"] for probe in probes] == [105, 120, 150, 101, 110, 135]
     assert all(probe["body"] == 1 for probe in probes)
+
+
+def test_generate_surface_probes_can_inset_endpoints() -> None:
+    nodes = []
+    node_id = 1
+    for x in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+        nodes.append([node_id, x, 0.0, -1.0])
+        nodes.append([node_id + 1, x, 0.0, 1.0])
+        node_id += 10
+    body = SurfaceBody(nodes=np.asarray(nodes, dtype=float), elems=np.empty((0, 4), dtype=int))
+
+    probes = generate_surface_marker_probes(
+        body,
+        1,
+        plane_axis="y",
+        plane_value=0.0,
+        n_samples=3,
+        plane_tolerance=1e-12,
+        x_band_factor=0.25,
+        include_endpoints=False,
+        deduplicate=False,
+    )
+
+    assert [probe["target_x"] for probe in probes if probe["side"] == "lower"] == [-0.5, 0.0, 0.5]
+    assert [probe["point"][0] for probe in probes if probe["side"] == "lower"] == [-0.5, 0.0, 0.5]
+    assert [probe["point"][0] for probe in probes if probe["side"] == "upper"] == [-0.5, 0.0, 0.5]
 
 
 def test_wide_x_band_still_selects_uniform_nearest_stations() -> None:
@@ -237,6 +264,54 @@ def test_probe_writer_roundtrips_marker_and_fluid_records(tmp_path: Path) -> Non
     assert parsed.marker_refs == source.marker_refs
     assert parsed.fluid_points == source.fluid_points
     assert parsed.errors == []
+
+
+def test_read_probe_payload_reports_loaded_probe_spacing(tmp_path: Path) -> None:
+    body = _sample_body()
+    write_surface(tmp_path / "unstruc_surface_in.dat", [body])
+    markers = generate_surface_marker_probes(
+        body,
+        1,
+        plane_axis="y",
+        plane_value=0.0,
+        n_samples=3,
+        plane_tolerance=1e-12,
+        x_band_factor=0.25,
+        deduplicate=False,
+    )
+    write_probe_file(
+        tmp_path / "probe_in.dat",
+        ProbeSpec(
+            marker_bodies=[int(marker["body"]) for marker in markers],
+            marker_refs=[int(marker["reference"]) for marker in markers],
+            fluid_points=[],
+            errors=[],
+        ),
+    )
+
+    payload = read_probe_payload(tmp_path / "probe_in.dat", [body])
+    layout = payload["layout"]
+
+    assert payload["marker_count"] == 6
+    assert layout["plane_axis"] == "y"
+    assert layout["max_plane_error"] == 0.0
+    assert layout["mean_x_spacing"] == 1.0
+    assert layout["max_x_spacing_difference"] == 0.0
+    assert layout["max_pair_x_difference"] == 0.0
+
+
+def test_probe_layout_summarizes_preview_target_errors() -> None:
+    markers = [
+        {"body": 1, "point": [0.0, 0.0, 0.01], "x_error": 0.1, "plane_error": 0.01},
+        {"body": 1, "point": [1.0, 0.0, 0.02], "x_error": 0.2, "plane_error": 0.02},
+    ]
+
+    layout = summarize_probe_layout(markers, plane_axis="z", plane_value=0.0)
+
+    assert layout["has_target_errors"] is True
+    assert layout["max_x_error"] == 0.2
+    assert layout["max_plane_error"] == 0.02
+    assert layout["mean_x_spacing"] == 1.0
 
 
 def test_empty_probe_file_layout_remains_parseable(tmp_path: Path) -> None:

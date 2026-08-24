@@ -26,6 +26,7 @@ from case_editor.probe import (  # noqa: E402
     resolve_marker_reference,
     resolve_marker_probes,
     step_surface_marker,
+    summarize_probe_layout,
     write_probe_file,
 )
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
@@ -33,11 +34,12 @@ from geometry.unstructure_surface.surface import read_surface, summarize_surface
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
 from motion.fort import fort_motion_info  # noqa: E402
+from motion.project import MotionProject  # noqa: E402
 from motion.visualize import motion_points_for_frames  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "probe-edit3"
+CONSOLE_API_VERSION = "fort-undeformed1"
 DENSE_UNIFORM_RATIO = 1.05
 DENSE_SPACING_TOLERANCE = 0.02
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
@@ -96,6 +98,7 @@ def make_handler(default_case_dir: Path):
                         "geometry_transform": True,
                         "fort_preview": True,
                         "fort_remove": True,
+                        "fort_undeformed": True,
                         "control_sync": True,
                         "input_sync": True,
                         "setup_sync": True,
@@ -268,6 +271,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "path": str(project.surface_path), "bodies": _json_ready(summarize_surface(kept)), "report": _case_report(case_dir)}
     if path == "/api/fort/preview":
         return _fort_preview_payload(case_dir, payload)
+    if path == "/api/fort/export-undeformed":
+        return _fort_export_undeformed_payload(case_dir, payload)
     if path == "/api/fort/remove":
         return _remove_fort_payload(case_dir, payload)
     raise ValueError(f"Unknown API route: {path}")
@@ -420,6 +425,7 @@ def _generate_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[
         x_band_factor=float(payload.get("x_band_factor", 0.25)),
         sides=str(payload.get("sides") or "both").lower(),
         deduplicate=bool(payload.get("deduplicate", True)),
+        include_endpoints=bool(payload.get("include_endpoints", True)),
     )
 
     fluids: list[dict[str, object]] = []
@@ -428,7 +434,11 @@ def _generate_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[
         fluids = list(existing.get("fluids", []))
     spec = probe_spec_from_payload({"markers": markers, "fluids": fluids})
     resolved, errors = resolve_marker_probes(spec, bodies)
-    generation = _probe_generation_summary(markers, str(payload.get("plane_axis") or "z").lower(), float(payload.get("plane_value", 0.0)))
+    generation = _probe_generation_summary(
+        markers,
+        str(payload.get("plane_axis") or "z").lower(),
+        float(payload.get("plane_value", 0.0)),
+    )
     for index, marker in enumerate(markers, start=1):
         marker["index"] = index
     return {
@@ -444,6 +454,7 @@ def _generate_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[
         "errors": errors,
         "preview": True,
         "generation": generation,
+        "layout": generation,
     }
 
 
@@ -506,16 +517,7 @@ def _step_probe_payload(case_dir: Path, payload: dict[str, object]) -> dict[str,
 
 
 def _probe_generation_summary(markers: list[dict[str, object]], plane_axis: str, plane_value: float) -> dict[str, object]:
-    x_errors = [float(marker.get("x_error", 0.0)) for marker in markers]
-    plane_errors = [float(marker.get("plane_error", 0.0)) for marker in markers]
-    return {
-        "plane_axis": plane_axis,
-        "plane_value": float(plane_value),
-        "max_plane_error": max(plane_errors, default=0.0),
-        "mean_plane_error": float(np.mean(plane_errors)) if plane_errors else 0.0,
-        "max_x_error": max(x_errors, default=0.0),
-        "mean_x_error": float(np.mean(x_errors)) if x_errors else 0.0,
-    }
+    return summarize_probe_layout(markers, plane_axis=plane_axis, plane_value=plane_value)
 
 
 def _amr_payload(case_dir: Path) -> dict[str, object]:
@@ -754,6 +756,41 @@ def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[st
             "first_time": info.first_time,
             "last_time": info.last_time,
         },
+    }
+
+
+def _fort_export_undeformed_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    output = str(payload.get("output") or "unstruc_surface_undeformed.dat")
+    project = MotionProject(
+        case_dir,
+        surface_name=str(payload.get("surface_name") or "unstruc_surface_in.dat"),
+        fort_start=int(payload.get("fort_start") or 41),
+    )
+    output_path, bodies, stats = project.export_undeformed_surface(
+        body_ids=_payload_body_ids(payload),
+        output=output,
+        component_order=str(payload.get("component_order") or "xyz"),
+        motion_mode=str(payload.get("motion_mode") or "velocity"),
+    )
+    return {
+        "ok": True,
+        "path": str(output_path),
+        "body_count": len(bodies),
+        "stats": [
+            {
+                "body": item.body_id,
+                "fort": str(item.fort_path),
+                "nodes": item.nodes,
+                "frames": item.frames,
+                "first_time": item.first_time,
+                "last_time": item.last_time,
+                "max_cycle_drift": item.max_cycle_drift,
+                "mean_cycle_drift": item.mean_cycle_drift,
+                "max_surface_offset": item.max_surface_offset,
+                "mean_surface_offset": item.mean_surface_offset,
+            }
+            for item in stats
+        ],
     }
 
 

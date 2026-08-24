@@ -21,7 +21,7 @@ from .fort import (
     read_frame,
     rotate_fort_motion,
 )
-from .project import MotionProject
+from .project import MotionProject, UndeformedBodyStats
 from .visualize import deformed_body, plot_midline_motion, plot_motion_2d, plot_motion_3d
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "HarmonicFit",
     "MotionFrameHeader",
     "MotionProject",
+    "UndeformedBodyStats",
     "analyze_centerline_motion",
     "analyze_centroid_motion",
     "components_to_physical",

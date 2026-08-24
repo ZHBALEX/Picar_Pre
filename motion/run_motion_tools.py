@@ -41,6 +41,13 @@ def parse_args() -> argparse.Namespace:
     rotate.add_argument("--output-dir", type=Path, default=None, help="Output directory. Defaults to case-dir.")
     rotate.add_argument("--suffix", default="_rotated", help="Output suffix appended after fort.NN. Default: _rotated.")
 
+    undeformed = subparsers.add_parser(
+        "export-undeformed",
+        help="Export a cycle-averaged undeformed unstruc surface from fort.* motion.",
+    )
+    undeformed.add_argument("--body", type=int, action="append", help="1-based body id. Repeat to select multiple bodies. Default: all matched fort.* files.")
+    undeformed.add_argument("--output", type=Path, default=Path("unstruc_surface_undeformed.dat"), help="Output surface filename/path. Default: unstruc_surface_undeformed.dat.")
+
     view = subparsers.add_parser("view", help="Visualize fort.* motion together with unstruc_surface_in.dat.")
     view.add_argument("mode", choices=["2d", "3d", "midline"], nargs="?", default="2d", help="Visualization mode. Default: 2d.")
     view.add_argument("--body", type=int, default=1, help="1-based body id. Default: 1.")
@@ -98,6 +105,32 @@ def main() -> None:
         print(f"Rotation : rx={args.rotate[0]}, ry={args.rotate[1]}, rz={args.rotate[2]}")
         for body_id, output_path, info in results:
             print(f"Body {body_id}: {output_path} ({info.frame_count} frames, {info.node_count} nodes)")
+        print("Status   : DONE")
+
+    elif args.command == "export-undeformed":
+        output_path, _bodies, stats = project.export_undeformed_surface(
+            body_ids=args.body,
+            output=args.output,
+            component_order=args.component_order,
+            motion_mode=args.motion_mode,
+        )
+        print("Undeformed Surface Export")
+        print("=========================")
+        print(f"Case dir : {project.case_dir}")
+        print(f"Surface  : {project.surface_path}")
+        print(f"Output   : {output_path}")
+        print(f"Mode     : {args.motion_mode}")
+        print(f"Order    : {args.component_order}")
+        print("")
+        print("Bodies")
+        print("======")
+        for item in stats:
+            print(
+                f"Body {item.body_id}: {item.nodes} nodes, {item.frames} frames, "
+                f"cycle drift max={item.max_cycle_drift:.8g}, "
+                f"surface offset max={item.max_surface_offset:.8g}, "
+                f"surface offset mean={item.mean_surface_offset:.8g}"
+            )
         print("Status   : DONE")
 
     elif args.command == "view":

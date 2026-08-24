@@ -80,6 +80,20 @@ coordinates, or `--raw-station` to keep the original station coordinate.
 Matplotlib outputs use a compact JFM-style format: serif math labels, no title,
 and no grid lines. Normalized midline plots label axes as `x/L_B` and `y/L_B`.
 
+## Export Undeformed Surface
+
+When `unstruc_surface_in.dat` stores an already-deformed phase of a periodic
+body, export a neutral/undeformed surface by integrating the matching `fort.*`
+motion through one full file and averaging each node position over the cycle:
+
+```bash
+python motion/run_motion_tools.py --case-dir path/to/case export-undeformed
+```
+
+The default output is `unstruc_surface_undeformed.dat`. The export preserves
+body order, node ids, and triangle topology, and reports the cycle-closure drift
+so non-periodic or free-drifting motion is easy to spot.
+
 ## Analyze
 
 Motion analysis uses the surface file as the initial geometry and `fort.*` as

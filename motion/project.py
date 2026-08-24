@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from geometry.unstructure_surface.surface import DEFAULT_CASE_SURFACE, read_surface
+import numpy as np
+
+from geometry.unstructure_surface.surface import DEFAULT_CASE_SURFACE, SurfaceBody, read_surface, write_surface
 
 from .analysis import (
     analyze_centerline_motion,
@@ -16,10 +18,27 @@ from .analysis import (
     write_midline_kinematics_csv,
 )
 from .fort import FortMotionInfo, fort_motion_info, format_motion_info, rotate_fort_motion
+from .fort import read_frame
 from .visualize import plot_midline_motion, plot_motion_2d, plot_motion_3d
 
 
 DEFAULT_FORT_START = 41
+
+
+@dataclass(frozen=True)
+class UndeformedBodyStats:
+    """Diagnostics for one cycle-averaged undeformed body export."""
+
+    body_id: int
+    fort_path: Path
+    nodes: int
+    frames: int
+    first_time: float
+    last_time: float
+    max_cycle_drift: float
+    mean_cycle_drift: float
+    max_surface_offset: float
+    mean_surface_offset: float
 
 
 @dataclass
@@ -111,6 +130,56 @@ class MotionProject:
             info = rotate_fort_motion(input_path, output_path, rotation=rotation, component_order=component_order)
             results.append((body_id, output_path, info))
         return results
+
+    def export_undeformed_surface(
+        self,
+        *,
+        body_ids: list[int] | None = None,
+        output: str | Path = "unstruc_surface_undeformed.dat",
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
+    ) -> tuple[Path, list[SurfaceBody], list[UndeformedBodyStats]]:
+        """Export a surface whose selected bodies are averaged over one fort period.
+
+        For velocity-mode fort files, positions are recovered by integrating the
+        stored marker velocities from the current surface through the full file.
+        The undeformed coordinates are the per-node cycle average of those
+        recovered positions. Topology, body order, node ids, and unselected
+        bodies are preserved.
+        """
+        out = Path(output)
+        if not out.is_absolute():
+            out = self.case_dir / out
+        if out.resolve() == self.surface_path.resolve():
+            raise ValueError("undeformed output must be different from the input surface file")
+
+        bodies = read_surface(self.surface_path)
+        target_ids = self._target_body_ids(body_ids, len(bodies))
+        exported: list[SurfaceBody] = []
+        stats: list[UndeformedBodyStats] = []
+
+        for body_id, body in enumerate(bodies, start=1):
+            if body_id not in target_ids:
+                exported.append(body)
+                continue
+            fort_path = self.fort_path_for_body(body_id)
+            if not fort_path.exists():
+                raise FileNotFoundError(f"Motion file not found for body {body_id}: {fort_path}")
+            points, body_stats = self._cycle_average_body_points(
+                body_id,
+                body,
+                fort_path,
+                component_order=component_order,
+                motion_mode=motion_mode,
+            )
+            nodes = body.nodes.copy()
+            nodes[:, 1:4] = points
+            exported.append(SurfaceBody(nodes=nodes, elems=body.elems.copy(), bbox=body.bbox))
+            stats.append(body_stats)
+
+        out.parent.mkdir(parents=True, exist_ok=True)
+        write_surface(out, exported)
+        return out, exported, stats
 
     def view(
         self,
@@ -279,6 +348,95 @@ class MotionProject:
         if body_id < 1 or body_id > len(bodies):
             raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
         return bodies[body_id - 1]
+
+    def _target_body_ids(self, body_ids: list[int] | None, body_count: int) -> set[int]:
+        if body_ids:
+            target_ids = {int(body_id) for body_id in body_ids}
+        else:
+            target_ids = {body_id for body_id, path in self.fort_files() if path.exists()}
+        if not target_ids:
+            raise FileNotFoundError(f"No fort.* files found in {self.case_dir}")
+        for body_id in target_ids:
+            if body_id < 1 or body_id > body_count:
+                raise ValueError(f"body_id must be in 1..{body_count}, got {body_id}")
+        return target_ids
+
+    def _cycle_average_body_points(
+        self,
+        body_id: int,
+        body: SurfaceBody,
+        fort_path: Path,
+        *,
+        component_order: str,
+        motion_mode: str,
+    ) -> tuple[np.ndarray, UndeformedBodyStats]:
+        info = fort_motion_info(fort_path)
+        if info.node_count != body.node_count:
+            raise ValueError(f"fort node count {info.node_count} does not match body {body_id} surface nodes {body.node_count}")
+
+        if motion_mode == "velocity":
+            average, cycle_drift = self._cycle_average_velocity(body, fort_path, component_order=component_order, info=info)
+        elif motion_mode in {"displacement", "relative"}:
+            average, cycle_drift = self._cycle_average_direct(body, fort_path, component_order=component_order, mode=motion_mode, info=info)
+        else:
+            raise ValueError("motion_mode must be 'velocity', 'relative', or 'displacement'")
+
+        offset = average - body.points
+        return average, UndeformedBodyStats(
+            body_id=body_id,
+            fort_path=fort_path,
+            nodes=info.node_count,
+            frames=info.frame_count,
+            first_time=info.first_time,
+            last_time=info.last_time,
+            max_cycle_drift=float(np.linalg.norm(cycle_drift, axis=1).max()),
+            mean_cycle_drift=float(np.linalg.norm(cycle_drift, axis=1).mean()),
+            max_surface_offset=float(np.linalg.norm(offset, axis=1).max()),
+            mean_surface_offset=float(np.linalg.norm(offset, axis=1).mean()),
+        )
+
+    def _cycle_average_velocity(
+        self,
+        body: SurfaceBody,
+        fort_path: Path,
+        *,
+        component_order: str,
+        info: FortMotionInfo,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        points = body.points.copy()
+        accumulated = np.zeros_like(points)
+        for frame_index in range(info.frame_count):
+            header, velocity = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
+            points = points + velocity * header.dt
+            accumulated += points
+        return accumulated / float(info.frame_count), points - body.points
+
+    def _cycle_average_direct(
+        self,
+        body: SurfaceBody,
+        fort_path: Path,
+        *,
+        component_order: str,
+        mode: str,
+        info: FortMotionInfo,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        accumulated = np.zeros_like(body.points)
+        first_points: np.ndarray | None = None
+        last_points: np.ndarray | None = None
+        center = body.points.mean(axis=0).reshape(1, 3)
+        for frame_index in range(info.frame_count):
+            _header, motion = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
+            if mode == "relative":
+                points = center + motion
+            else:
+                points = body.points + motion
+            if first_points is None:
+                first_points = points.copy()
+            last_points = points
+            accumulated += points
+        if first_points is None or last_points is None:
+            raise ValueError(f"No frames found in {fort_path}")
+        return accumulated / float(info.frame_count), last_points - first_points
 
     def _resolve_output_path(self, output: str | Path) -> Path:
         out = Path(output)
