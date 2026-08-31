@@ -165,6 +165,119 @@ def rotate_fort_motion(
     return fort_motion_info(output_path)
 
 
+def swap_fort_yz(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    chunk_nodes: int = 65536,
+    component_order: str = "xyz",
+) -> FortMotionInfo:
+    """Swap physical Y and Z motion components in a fort.* file."""
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("swap_fort_yz output_path must differ from input_path")
+
+    info = fort_motion_info(input_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with input_path.open("rb") as src, output_path.open("wb") as dst:
+        for frame_index in range(info.frame_count):
+            header_raw = src.read(FRAME_HEADER_BYTES)
+            if len(header_raw) != FRAME_HEADER_BYTES:
+                raise ValueError(f"Could not read header for frame {frame_index} from {input_path}")
+            dst.write(header_raw)
+
+            remaining = info.node_count
+            while remaining:
+                count = min(int(chunk_nodes), remaining)
+                records = np.fromfile(src, dtype=NODE_DTYPE, count=count)
+                if len(records) != count:
+                    raise ValueError(f"Could not read node records for frame {frame_index} from {input_path}")
+                _validate_node_markers(records, input_path, frame_index)
+
+                records = records.copy()
+                physical = components_to_physical(records["xyz"], component_order)
+                physical[:, [1, 2]] = physical[:, [2, 1]]
+                records["xyz"] = physical_to_components(physical, component_order)
+                records.tofile(dst)
+                remaining -= count
+
+    return fort_motion_info(output_path)
+
+
+def resample_fort_motion(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    target_steps_per_cycle: int,
+    source_steps_per_cycle: int | None = None,
+    component_order: str = "xyz",
+) -> FortMotionInfo:
+    """Linearly resample fort.* frames from one cycle step count to another.
+
+    Frames are treated as periodic samples at end-of-step times: a 960-frame
+    one-cycle file spans phases 1/960 through 1. Output frames follow the same
+    convention, so resampling to 720 frames writes phases 1/720 through 1.
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("resample_fort_motion output_path must differ from input_path")
+
+    info = fort_motion_info(input_path)
+    source_steps = int(source_steps_per_cycle or info.frame_count)
+    target_steps = int(target_steps_per_cycle)
+    if source_steps <= 0:
+        raise ValueError("source_steps_per_cycle must be positive")
+    if target_steps <= 0:
+        raise ValueError("target_steps_per_cycle must be positive")
+    if info.frame_count % source_steps != 0:
+        raise ValueError(f"{input_path} has {info.frame_count} frames, not a whole number of {source_steps}-step cycles")
+
+    cycles = info.frame_count // source_steps
+    period = float(info.dt) * source_steps
+    output_dt = period / target_steps
+    first_cycle_origin = float(info.first_time) - float(info.dt)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    frame_cache: dict[int, np.ndarray] = {}
+
+    def physical_frame(frame_index: int) -> np.ndarray:
+        cached = frame_cache.get(frame_index)
+        if cached is not None:
+            return cached
+        _, vectors = read_frame(input_path, frame_index, node_count=info.node_count, component_order=component_order)
+        if len(frame_cache) >= 4:
+            frame_cache.pop(next(iter(frame_cache)))
+        frame_cache[frame_index] = vectors
+        return vectors
+
+    with output_path.open("wb") as dst:
+        for cycle in range(cycles):
+            cycle_base = cycle * source_steps
+            cycle_origin = first_cycle_origin + cycle * period
+            for out_index in range(target_steps):
+                source_pos = ((out_index + 1) * source_steps / target_steps) - 1.0
+                lo_local = int(np.floor(source_pos))
+                alpha = float(source_pos - lo_local)
+                hi_local = lo_local + 1
+                lo_frame = cycle_base + (lo_local % source_steps)
+                hi_frame = cycle_base + (hi_local % source_steps)
+
+                lo_vectors = physical_frame(lo_frame)
+                if alpha == 0.0:
+                    physical = lo_vectors
+                else:
+                    hi_vectors = physical_frame(hi_frame)
+                    physical = (1.0 - alpha) * lo_vectors + alpha * hi_vectors
+
+                raw_vectors = physical_to_components(physical, component_order)
+                _write_frame(dst, output_dt, cycle_origin + (out_index + 1) * output_dt, raw_vectors)
+
+    return fort_motion_info(output_path)
+
+
 def copy_fort_motion(input_path: str | Path, output_path: str | Path) -> FortMotionInfo:
     """Copy one fort.* file and return its parsed metadata."""
     input_path = Path(input_path)
@@ -217,6 +330,16 @@ def _frame_offset(frame_index: int, node_count: int) -> int:
 def _validate_node_markers(records: np.ndarray, path: Path, frame_index: int) -> None:
     if not np.all(records["start"] == VECTOR_RECORD_BYTES) or not np.all(records["end"] == VECTOR_RECORD_BYTES):
         raise ValueError(f"Invalid node record markers in {path} frame {frame_index}")
+
+
+def _write_frame(stream, dt: float, time: float, vectors: np.ndarray) -> None:
+    vectors = np.asarray(vectors, dtype=float)
+    stream.write(HEADER_STRUCT.pack(HEADER_RECORD_BYTES, float(dt), float(time), int(vectors.shape[0]), HEADER_RECORD_BYTES))
+    records = np.empty(int(vectors.shape[0]), dtype=NODE_DTYPE)
+    records["start"] = VECTOR_RECORD_BYTES
+    records["xyz"] = vectors
+    records["end"] = VECTOR_RECORD_BYTES
+    records.tofile(stream)
 
 
 def _validate_component_order(component_order: str) -> str:

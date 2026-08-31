@@ -19,7 +19,9 @@ from .fort import (
     fort_motion_info,
     physical_to_components,
     read_frame,
+    resample_fort_motion,
     rotate_fort_motion,
+    swap_fort_yz,
 )
 from .project import MotionProject, UndeformedBodyStats
 from .visualize import deformed_body, plot_midline_motion, plot_motion_2d, plot_motion_3d
@@ -43,7 +45,9 @@ __all__ = [
     "plot_motion_3d",
     "physical_to_components",
     "read_frame",
+    "resample_fort_motion",
     "rotate_fort_motion",
+    "swap_fort_yz",
     "write_centerline_csv",
     "write_centroid_equation_csv",
     "write_centroid_kinematics_csv",

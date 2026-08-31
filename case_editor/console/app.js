@@ -72,6 +72,7 @@
     rotZ: document.getElementById("rotZ"),
     bodyScale: document.getElementById("bodyScale"),
     applyBodyTransform: document.getElementById("applyBodyTransform"),
+    swapBodyYzFort: document.getElementById("swapBodyYzFort"),
     removeBodies: document.getElementById("removeBodies"),
     meshAxes: document.getElementById("meshAxes"),
     meshInputFile: document.getElementById("meshInputFile"),
@@ -116,9 +117,17 @@
     previewSetupSync: document.getElementById("previewSetupSync"),
     applySetupSync: document.getElementById("applySetupSync"),
     setupSyncReport: document.getElementById("setupSyncReport"),
+    fortFile: document.getElementById("fortFile"),
+    fortImportBody: document.getElementById("fortImportBody"),
+    fortAutoName: document.getElementById("fortAutoName"),
+    replaceFort: document.getElementById("replaceFort"),
+    appendFort: document.getElementById("appendFort"),
     fortList: document.getElementById("fortList"),
     fortBody: document.getElementById("fortBody"),
     fortFrame: document.getElementById("fortFrame"),
+    fortSourceSteps: document.getElementById("fortSourceSteps"),
+    fortTargetSteps: document.getElementById("fortTargetSteps"),
+    resampleFort: document.getElementById("resampleFort"),
     fortSamples: document.getElementById("fortSamples"),
     fortOrder: document.getElementById("fortOrder"),
     fortMode: document.getElementById("fortMode"),
@@ -142,6 +151,7 @@
     meshControlsReady: false,
     meshPreviewSuspended: false,
     pendingGeometryFile: null,
+    pendingFortFile: null,
     bounds: null,
     angleX: 0.62,
     angleY: -0.78,
@@ -208,6 +218,7 @@
     el.appendGeometry.addEventListener("click", () => importGeometry(true));
     el.exportStl.addEventListener("click", exportStl);
     el.applyBodyTransform.addEventListener("click", applyBodyTransform);
+    el.swapBodyYzFort.addEventListener("click", swapSelectedBodyYzFort);
     el.removeBodies.addEventListener("click", removeSelectedBodies);
     el.loadMeshInput.addEventListener("click", loadSelectedMeshInput);
     el.previewMesh.addEventListener("click", previewMeshFromControls);
@@ -242,6 +253,12 @@
     el.previewFort.addEventListener("click", previewFortMotion);
     el.clearFort.addEventListener("click", clearFortMotion);
     el.exportFortUndeformed.addEventListener("click", exportFortUndeformed);
+    el.fortFile.addEventListener("change", selectPendingFortFile);
+    el.fortAutoName.addEventListener("change", syncFortImportControls);
+    el.replaceFort.addEventListener("click", () => importFort("replace"));
+    el.appendFort.addEventListener("click", () => importFort("append"));
+    el.fortBody.addEventListener("change", updateFortResamplePlaceholder);
+    el.resampleFort.addEventListener("click", resampleSelectedFort);
     el.scaleRef.addEventListener("input", previewMeshFromControls);
     el.relax.addEventListener("input", previewMeshFromControls);
     window.addEventListener("resize", requestDraw);
@@ -269,6 +286,7 @@
       state.motion = null;
       state.loadedFiles = [];
       state.pendingGeometryFile = null;
+      state.pendingFortFile = null;
       setProbeLayerAvailable(false);
 
       if (report.surface) {
@@ -374,6 +392,9 @@
           if (await importGeometry(importedMeshCount > 0, file)) {
             importedMeshCount += 1;
           }
+        } else if (isFortFileName(lower)) {
+          state.pendingFortFile = file;
+          addLoadedFile("fort-upload", file.name, "pending fort import");
         } else if (isMeshInputName(lower)) {
           const text = await file.text();
           const params = parseMeshInputText(text);
@@ -414,6 +435,7 @@
     renderLoadedFiles();
     renderBodyList();
     renderAmrPanel();
+    renderFortPanel();
     renderProbePanel();
   }
 
@@ -475,6 +497,10 @@
     if (id.startsWith("mesh:") && state.pendingGeometryFile && id === `mesh:${state.pendingGeometryFile.name}`) {
       state.pendingGeometryFile = null;
     }
+    if (id === "fort-upload") {
+      state.pendingFortFile = null;
+      if (el.fortFile) el.fortFile.value = "";
+    }
     state.loadedFiles = state.loadedFiles.filter((item) => item.id !== id);
     if (!state.mesh.x || !state.mesh.y) state.mesh.denseBox = null;
     recomputeBounds();
@@ -482,6 +508,7 @@
     renderLoadedFiles();
     renderBodyList();
     renderAmrPanel();
+    renderFortPanel();
     renderProbePanel();
     requestDraw();
   }
@@ -1099,6 +1126,135 @@
       ? bodyIds.map((id) => `<option value="${id}">Body ${id}</option>`).join("")
       : `<option value="1">Body 1</option>`;
     el.fortBody.value = bodyIds.includes(current) ? String(current) : String(bodyIds[0] || 1);
+    if (el.fortImportBody) {
+      el.fortImportBody.placeholder = `auto: Body ${nextFortBodyId(fort)}`;
+    }
+    syncFortImportControls();
+    updateFortResamplePlaceholder();
+  }
+
+  function selectPendingFortFile() {
+    const file = el.fortFile.files && el.fortFile.files[0];
+    if (!file) return;
+    state.pendingFortFile = file;
+    addLoadedFile("fort-upload", file.name, "pending fort import");
+    renderLoadedFiles();
+    setStatus(`Selected fort file: ${file.name}`);
+  }
+
+  function syncFortImportControls() {
+    if (!el.fortAutoName || !el.fortImportBody) return;
+    const auto = el.fortAutoName.checked;
+    el.fortImportBody.disabled = auto;
+    if (auto) el.fortImportBody.value = "";
+  }
+
+  async function importFort(mode) {
+    const file = (el.fortFile.files && el.fortFile.files[0]) || state.pendingFortFile;
+    if (!file) {
+      setStatus("Choose or drop a fort.* file first.");
+      return;
+    }
+    const fortStart = state.fort && state.fort.fort_start ? Number(state.fort.fort_start) : 41;
+    const payload = {
+      case_dir: el.caseDir.value.trim(),
+      filename: file.name,
+      mode,
+      fort_start: fortStart,
+    };
+
+    if (mode === "replace") {
+      const bodyId = Math.max(1, Math.trunc(Number(el.fortBody.value) || 1));
+      const fortName = `fort.${fortStart + bodyId - 1}`;
+      if (!window.confirm(`Replace ${fortName} with ${file.name}?`)) return;
+      payload.body_id = bodyId;
+      payload.auto_rename = false;
+    } else {
+      const auto = !el.fortAutoName || el.fortAutoName.checked;
+      payload.auto_rename = auto;
+      if (!auto) {
+        const bodyId = Math.trunc(Number(el.fortImportBody.value) || 0);
+        if (bodyId <= 0) {
+          setStatus("Set a positive body number, or enable Auto next free name.");
+          return;
+        }
+        payload.body_id = bodyId;
+      }
+    }
+
+    try {
+      await requireFortImportApi();
+      payload.content_base64 = await fileToBase64(file);
+      const result = await postJson("/api/fort/import", payload);
+      state.pendingFortFile = null;
+      if (el.fortFile) el.fortFile.value = "";
+      await loadCase();
+      const info = result.info || {};
+      const mismatch = info.node_match === false
+        ? `\nNode mismatch: ${result.name} has ${info.nodes} nodes, Body ${result.body} has ${info.surface_nodes}.`
+        : "";
+      const renamed = result.auto_renamed ? " using automatic name" : "";
+      const verb = mode === "replace" ? (result.replaced ? "Replaced" : "Created") : "Added";
+      setStatus(`${verb} ${file.name} as ${result.name} for Body ${result.body}${renamed}.${mismatch}`);
+    } catch (err) {
+      setStatus(`Fort import failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
+  function nextFortBodyId(fort) {
+    const files = (fort && fort.files) || [];
+    const occupied = new Set(files.map((item) => Number(item.body)).filter((value) => Number.isFinite(value) && value > 0));
+    const surfaceCount = Number(fort && fort.body_count) || (state.surface ? state.surface.bodies.length : 0);
+    const maxBody = Math.max(surfaceCount, ...Array.from(occupied), 0);
+    for (let bodyId = 1; bodyId <= maxBody; bodyId += 1) {
+      if (!occupied.has(bodyId)) return bodyId;
+    }
+    return maxBody + 1;
+  }
+
+  function fortFileForBody(bodyId) {
+    const files = state.fort && state.fort.files ? state.fort.files : [];
+    return files.find((item) => Number(item.body) === Number(bodyId)) || null;
+  }
+
+  function updateFortResamplePlaceholder() {
+    if (!el.fortSourceSteps || !el.fortBody) return;
+    const item = fortFileForBody(Number(el.fortBody.value || 1));
+    el.fortSourceSteps.placeholder = item && item.frames ? `auto: ${item.frames}` : "auto";
+  }
+
+  async function resampleSelectedFort() {
+    const bodyId = Math.max(1, Math.trunc(Number(el.fortBody.value) || 1));
+    const item = fortFileForBody(bodyId);
+    const sourceSteps = Math.trunc(Number(el.fortSourceSteps.value) || 0);
+    const targetSteps = Math.trunc(Number(el.fortTargetSteps.value) || 0);
+    if (targetSteps <= 0) {
+      setStatus("Set a positive target cycle step count.");
+      return;
+    }
+    const sourceLabel = sourceSteps > 0 ? String(sourceSteps) : (item && item.frames ? String(item.frames) : "current frame count");
+    const fortName = item && item.name ? item.name : `fort.${(state.fort && state.fort.fort_start ? state.fort.fort_start : 41) + bodyId - 1}`;
+    if (!window.confirm(`Resample ${fortName} for Body ${bodyId} from ${sourceLabel} to ${targetSteps} steps per cycle?`)) return;
+
+    try {
+      await requireFortResampleApi();
+      const result = await postJson("/api/fort/resample", {
+        case_dir: el.caseDir.value.trim(),
+        body_id: bodyId,
+        fort_start: state.fort && state.fort.fort_start ? Number(state.fort.fort_start) : 41,
+        source_steps_per_cycle: sourceSteps > 0 ? sourceSteps : null,
+        target_steps_per_cycle: targetSteps,
+        component_order: el.fortOrder.value || "xyz",
+      });
+      state.motion = null;
+      await loadCase();
+      setStatus(
+        `Resampled ${result.name}: ${result.before.frames} -> ${result.after.frames} frames, `
+        + `dt ${formatShort(result.before.dt)} -> ${formatShort(result.after.dt)}.`
+      );
+    } catch (err) {
+      setStatus(`Fort resample failed: ${cleanErrorMessage(err)}`);
+    }
   }
 
   async function previewFortMotion() {
@@ -1239,6 +1395,35 @@
     }
   }
 
+  async function swapSelectedBodyYzFort() {
+    const ids = selectedBodyIds();
+    if (!ids.length) {
+      setStatus("Select at least one body first.");
+      return;
+    }
+    const fortStart = state.fort && state.fort.fort_start ? Number(state.fort.fort_start) : 41;
+    const fortNames = ids.map((bodyId) => `fort.${fortStart + bodyId - 1}`).join(", ");
+    if (!window.confirm(`Swap Y/Z for Body ${ids.join(", ")} and rewrite ${fortNames}?`)) return;
+    try {
+      await requireGeometryYzSwapApi();
+      const result = await postJson("/api/geometry/swap-yz-fort", {
+        case_dir: el.caseDir.value.trim(),
+        body_ids: ids,
+        fort_start: fortStart,
+        component_order: el.fortOrder.value || "xyz",
+        require_fort: true,
+      });
+      await loadCase();
+      const mismatches = (result.forts || []).filter((item) => item.node_match === false);
+      const mismatchText = mismatches.length
+        ? `\nNode mismatch warning: ${mismatches.map((item) => `${item.name} ${item.nodes}/${item.surface_nodes}`).join(", ")}`
+        : "";
+      setStatus(`Swapped Y/Z for body ${ids.join(", ")} and ${fortNames}.${mismatchText}`);
+    } catch (err) {
+      setStatus(`Swap Y/Z failed: ${cleanErrorMessage(err)}`);
+    }
+  }
+
   async function removeSelectedBodies() {
     const ids = selectedBodyIds();
     if (!ids.length) {
@@ -1262,10 +1447,38 @@
     }
   }
 
+  async function requireGeometryYzSwapApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.geometry_yz_swap) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before swapping Y/Z.");
+    }
+  }
+
+  async function requireSurfaceAppendApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.surface_append) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before appending surface DAT files.");
+    }
+  }
+
   async function requireFortPreviewApi() {
     const health = await fetchJson("/api/health");
     if (!health.fort_preview) {
       throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before previewing fort motion.");
+    }
+  }
+
+  async function requireFortImportApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.fort_import) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before importing fort files.");
+    }
+  }
+
+  async function requireFortResampleApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.fort_resample) {
+      throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before resampling fort files.");
     }
   }
 
@@ -1289,6 +1502,10 @@
 
   function isMeshInputName(name) {
     return name === "input.dat" || name.includes("mesh_input") || name.includes("input_mesh");
+  }
+
+  function isFortFileName(name) {
+    return /^fort\.\d+$/.test(name) || name.endsWith(".fort");
   }
 
   function parseMeshInputText(text) {
@@ -1800,21 +2017,24 @@
     try {
       const lower = file.name.toLowerCase();
       if (lower.endsWith(".dat")) {
-        if (append) {
-          setStatus("Append supports STL/OBJ files. Use Import to replace the surface with a DAT file.");
-          return false;
-        }
-        setStatus(`Importing surface: ${file.name}`);
+        if (append) await requireSurfaceAppendApi();
+        setStatus(`${append ? "Appending" : "Importing"} surface: ${file.name}`);
         const content = await file.text();
-        await postJson("/api/geometry/save-surface", { case_dir: el.caseDir.value.trim(), content });
+        await postJson("/api/geometry/save-surface", {
+          case_dir: el.caseDir.value.trim(),
+          content,
+          mode: append ? "append" : "replace",
+          append,
+        });
       } else if (lower.endsWith(".stl") || lower.endsWith(".obj")) {
         const label = meshFileLabel(lower);
-        setStatus(`Importing ${label}: ${file.name}`);
+        setStatus(`${append ? "Appending" : "Importing"} ${label}: ${file.name}`);
         const contentBase64 = await fileToBase64(file);
         await postJson(`/api/geometry/import-${label.toLowerCase()}`, {
           case_dir: el.caseDir.value.trim(),
           filename: file.name,
           content_base64: contentBase64,
+          mode: append ? "append" : "replace",
           append,
         });
       } else {

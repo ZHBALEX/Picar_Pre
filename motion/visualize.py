@@ -41,18 +41,74 @@ def body_from_points(body: SurfaceBody, points: np.ndarray) -> SurfaceBody:
     return SurfaceBody(nodes=nodes, elems=body.elems.copy(), bbox=body.bbox)
 
 
-def sample_frame_indices(frame_count: int, samples: int, highlight_frame: int | None = None) -> list[int]:
+def sample_frame_indices(
+    frame_count: int,
+    samples: int,
+    highlight_frame: int | None = None,
+    required_frames: list[int] | tuple[int, ...] | set[int] | None = None,
+) -> list[int]:
     """Return sorted unique frame indices for motion envelope plotting."""
     if frame_count <= 0:
         return []
     samples = max(1, min(int(samples), frame_count))
-    indices = np.linspace(0, frame_count - 1, samples, dtype=int).tolist()
-    if highlight_frame is not None:
-        highlight_frame = int(highlight_frame)
-        if highlight_frame not in indices:
-            nearest = min(range(len(indices)), key=lambda idx: abs(indices[idx] - highlight_frame))
-            indices[nearest] = highlight_frame
+    indices = set(np.linspace(0, frame_count - 1, samples, dtype=int).tolist())
+    if required_frames is not None:
+        indices.update(int(frame) for frame in required_frames if 0 <= int(frame) < frame_count)
+    if highlight_frame is not None and 0 <= int(highlight_frame) < frame_count:
+        indices.add(int(highlight_frame))
     return sorted(set(indices))
+
+
+def motion_envelope_frame_indices(
+    body: SurfaceBody,
+    fort_path: str | Path,
+    *,
+    axes: tuple[int, ...] = (0, 1, 2),
+    component_order: str = "xyz",
+    motion_mode: str = "velocity",
+) -> list[int]:
+    """Return frame indices that define the sampled motion envelope."""
+    info = fort_motion_info(fort_path)
+    if info.frame_count <= 0:
+        return []
+
+    axes = tuple(int(axis) for axis in axes)
+    axis_mins = np.full(len(axes), np.inf)
+    axis_maxs = np.full(len(axes), -np.inf)
+    min_frames = np.zeros(len(axes), dtype=int)
+    max_frames = np.zeros(len(axes), dtype=int)
+    max_displacement_norm = -np.inf
+    max_displacement_frame = 0
+
+    points = body.points.copy()
+    for frame_index in range(info.frame_count):
+        header, motion = read_frame(fort_path, frame_index, node_count=body.node_count, component_order=component_order)
+        if motion_mode == "velocity":
+            points = points + motion * header.dt
+            deformed = points
+        elif motion_mode == "relative":
+            deformed = body.points.mean(axis=0).reshape(1, 3) + motion
+        elif motion_mode == "displacement":
+            deformed = body.points + motion
+        else:
+            raise ValueError("motion_mode must be 'velocity', 'relative', or 'displacement'")
+
+        coords = deformed[:, axes]
+        frame_mins = coords.min(axis=0)
+        frame_maxs = coords.max(axis=0)
+        lower = frame_mins < axis_mins
+        upper = frame_maxs > axis_maxs
+        axis_mins[lower] = frame_mins[lower]
+        axis_maxs[upper] = frame_maxs[upper]
+        min_frames[lower] = frame_index
+        max_frames[upper] = frame_index
+
+        displacement_norm = float(np.linalg.norm(deformed - body.points, axis=1).max())
+        if displacement_norm > max_displacement_norm:
+            max_displacement_norm = displacement_norm
+            max_displacement_frame = frame_index
+
+    return sorted(set(min_frames.tolist() + max_frames.tolist() + [max_displacement_frame]))
 
 
 def plot_motion_2d(
@@ -79,7 +135,14 @@ def plot_motion_2d(
     info = fort_motion_info(fort_path)
     frame = _normalize_frame(frame, info.frame_count)
     axes = _plane_axes(plane)
-    sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    envelope_indices = motion_envelope_frame_indices(
+        body,
+        fort_path,
+        axes=axes,
+        component_order=component_order,
+        motion_mode=motion_mode,
+    )
+    sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame, required_frames=envelope_indices)
     frame_points, _ = motion_points_for_frames(
         body,
         fort_path,
@@ -145,7 +208,13 @@ def plot_motion_3d(
 
     info = fort_motion_info(fort_path)
     frame = _normalize_frame(frame, info.frame_count)
-    sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame)
+    envelope_indices = motion_envelope_frame_indices(
+        body,
+        fort_path,
+        component_order=component_order,
+        motion_mode=motion_mode,
+    )
+    sample_indices = sample_frame_indices(info.frame_count, samples, highlight_frame=frame, required_frames=envelope_indices)
     frame_points, _ = motion_points_for_frames(
         body,
         fort_path,

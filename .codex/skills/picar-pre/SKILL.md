@@ -1,128 +1,111 @@
 ---
 name: picar-pre
-description: Work on the Picar_Pre repository, a Python preprocessing toolkit for PICAR solver case directories. Use when editing or explaining geometry/unstruc_surface_in.dat, canonical_body_in.dat, input.dat, x/y/z grid generation, prescribed-motion fort.* files, the local Picar console, or example case-building workflows in this repo.
+description: Develop, inspect, or prepare PICAR cases with Picar_Pre. Use for its local console, surface/STL/OBJ geometry, grids, input/canonical Setup Sync, AMR, probes, prescribed-motion fort files, and associated phase-case workflows. Not a general PICAR solver or CFD postprocessing skill.
 ---
 
-# Picar_Pre Skill
+# Picar_Pre
 
-## When To Use
-
-Use this skill for work inside the `Picar_Pre` repository. This project is a PICAR preprocessing assistant organized around one case directory at a time, not a generic Python package.
-
-A case directory commonly contains `input.dat`, `canonical_body_in.dat`, `unstruc_surface_in.dat`, `xgrid.dat`, `ygrid.dat`, optional `zgrid.dat`, optional `fort.*`, and `run.slurm`.
-
-Start from the repository root. The main visual entry point is:
+Picar_Pre is a local, case-directory-oriented preprocessing toolkit. Existing
+solver files remain the source of truth; it is not a solver runner or a replacement
+file format. Run commands from the repository root unless stated otherwise.
 
 ```bash
 python -B picar_console.py
 python -B picar_console.py path/to/case
 ```
 
-If port `8765` is occupied, the console chooses another port and prints the exact URL.
+The default case is `example/run_case`, not the 2D example. The server binds to
+`127.0.0.1`; if port 8765 is occupied, use the exact URL it prints.
 
-## Core Principles
+## Working conventions
 
-- Prefer existing project APIs and CLIs over direct solver-file edits.
-- For small user-facing operations, prefer the CLI entry point.
-- For multi-file synchronization or scripted case generation, prefer `CaseProject` or `case_editor.workflow.build_case(config)`.
-- Do not use ad hoc string replacement for solver-format files when a project editor/parser exists.
-- Verify file paths before assuming similarly named files exist.
-- The repository directory is intentionally named `geometry/unstructure_surface`, not `geometry/unstructured_surface`.
+- Keep changes modular and small, with English code comments. Preserve unrelated
+  panels and controls when adding a feature to one panel.
+- Prefer existing parsers, project APIs, and CLIs. Do not casually reformat
+  solver files or replace the workflow with an extra manifest/configuration layer.
+- For simple operations use the relevant CLI; for coordinated case building use
+  `CaseProject` or `case_editor.workflow.build_case(config)`.
+- The real directory is `geometry/unstructure_surface`, not `unstructured_surface`.
+- Check current code and `git status`: some recent console/motion features may
+  exist as uncommitted changes. A historical response saying “implemented” is not
+  proof that a feature survived a revert or exists in the current checkout.
+- Preserve examples and source cases during testing. Use temporary cases for
+  writes; loading, previewing, and inspecting must not imply permission to save.
 
-## Task Routing
+## Task routing
 
-Use this map to choose the first entry point:
+Read only the reference relevant to the work; paths mentioned inside references
+are repository-relative unless explicitly identified as external.
 
-| User task | Preferred entry point |
+| Task | Entry point and reference |
 | --- | --- |
-| Visual case inspection or console GUI work | `python -B picar_console.py <case>` and files in `case_editor/console/` |
-| Whole-case init/edit/report/validate | `case_editor/run_case_editor.py` or `CaseProject` |
-| Complete scripted case generation | `case_editor.workflow.build_case(config)` or `example/build_2d_cylinder_case.py` |
-| Surface generation, STL import/export, transform, combine, inspect | `geometry/unstructure_surface/run_surface_tools.py` or `SurfaceProject` |
-| Grid generation, mesh input, optimization, mesh plots | `python -m mesh.run_mesh_tools` or `MeshProject` |
-| Prescribed motion, `fort.*` inspection, rotation, visualization, analysis | `motion/run_motion_tools.py` or `MotionProject` |
-| Box trimming of surface plus matching motion records | `trim_surface_fort_box.py`, with extra caution around output overwrite |
+| Console UI, viewport, imports/exports, mesh display or generation | `case_editor/run_picar_console.py`, `case_editor/console/`; [console and mesh](references/console-mesh.md) |
+| Surface generation/conversion/transform | `geometry/unstructure_surface/run_surface_tools.py`, `SurfaceProject`; [formats and synchronization](references/formats-sync.md) |
+| Setup Sync, input/canonical, body mapping, AMR compatibility | `case_editor/control/`, `case_editor/data_facts.py`; [formats and synchronization](references/formats-sync.md) |
+| Probe generation, positioning, spacing, file parsing | `case_editor/probe.py`; [probes](references/probes.md) |
+| fort parsing, preview, resample, Y/Z swap, neutral surface | `motion/fort.py`, `motion/project.py`, `motion/visualize.py`; [motion](references/motion.md) |
+| Previous batch pitching/heaving phase cases | External `foil_pitching_PhaseChange` project; [phase workflow](references/phase-workflow.md) |
+| Whole-case generation | `case_editor.workflow.build_case(config)`, `example/build_2d_cylinder_case.py` |
+| Box trimming of geometry and matching fort nodes | `trim_surface_fort_box.py`; [formats and synchronization](references/formats-sync.md) |
 
-For less common options, inspect the relevant CLI help or existing README before inventing flags.
+For uncommon flags inspect CLI help. Repository READMEs contain some older
+descriptions (notably motion outlines, mesh-input naming, and sync blockers);
+resolve disagreement against implementation and regression tests.
 
-## Critical Coupling Rules
+## Cross-file invariants
 
-- `input.dat` should be edited through `InputDatEditor` or case-level commands to preserve the line-based format.
-- `canonical_body_in.dat` must match `unstruc_surface_in.dat` body count, node count, and element count.
-- After body count, node count, element count, or body ordering changes, resync or check `canonical_body_in.dat`.
-- CLI body ids are 1-based. Python body lists are 0-based.
-- Mesh counts are interval counts. Written grid files contain `intervals + 1` coordinate nodes.
-- `zgrid.dat` is optional for 2D cases but should be generated when the mesh has a positive Z range.
-- Solver-style 2D surfaces are usually thin side-wall surfaces with triangle elements; flat boundary curves with `elem_count = 0` are only appropriate for sketches/previews or explicitly supported workflows.
-- STL conversion/export handles boundary surface triangles, not volume meshes.
+- `canonical_body_in.dat` body/node/element counts must match the surface.
+- Body ids in CLIs/APIs are 1-based; Python body lists are 0-based. The usual
+  mapping is body `b` to `fort.(fort_start+b-1)`, with `fort_start=41`.
+- Surface body order, canonical records, fort numbering, and probe body/node
+  references must stay consistent. Current Geometry Remove and Fort Remove are
+  separate actions, not an automatic coordinated transaction.
+- Mesh-generation counts are **interval counts**; grid arrays and input sync use
+  **coordinate-node counts**, normally intervals + 1.
+- Missing `zgrid.dat` can be valid for 2D. Positive Z extent should generate Z
+  coordinates even with zero dense-Z intervals. Do not invent missing mesh data
+  merely to show a geometry-only case.
+- Default fort semantics are physical `xyz` **velocities**, integrated using each
+  frame's `dt` from the reference surface. Never treat raw velocity extrema as
+  displacement or integrate known displacement data again.
+- Translation of a surface does not change velocity vectors. Rotation, scaling,
+  reflection, topology/node-order changes, and body reordering require checking
+  the matching motion and probes. Importing STL/OBJ can renumber nodes.
 
-## Motion And fort.* Rules
+## Verification
 
-- PICAR prescribed-motion `fort.*` files in this repository use a unified Fortran sequential unformatted format.
-- Each frame contains a header record with `20` payload bytes, followed by node-vector records with `24` payload bytes.
-- The default component order is physical `xyz`.
-- The default motion mode is velocity. Visualization and analysis integrate velocities from the reference `unstruc_surface_in.dat`.
-- Do not integrate again if a task explicitly says the values have already been converted to displacement or position.
-- Translation of a static surface does not require changing velocity vectors.
-- Rotation, scale, reflection, node reorder, node-count change, topology change, or body reorder requires checking or regenerating the matching `fort.*` files.
-- Body 1 normally maps to `fort.41`, body 2 to `fort.42`, controlled by `--fort-start`.
-- Large `fort.*` files should not be copied or rewritten unless the task explicitly needs it.
-
-## Common Commands
-
-Keep commands targeted; avoid turning this skill into a full manual.
-
-```bash
-python case_editor/run_case_editor.py --case-dir path/to/case report
-python case_editor/run_case_editor.py --case-dir path/to/case validate
-python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case inspect --roundtrip
-python -m mesh.run_mesh_tools --case-dir path/to/case generate
-python -m mesh.run_mesh_tools --case-dir path/to/case inspect
-python motion/run_motion_tools.py --case-dir path/to/case inspect
-```
-
-For the default one-file generated case:
+Choose checks for the affected behavior, rather than running every expensive
+operation. Documentation-only work does not require launching a solver or GUI.
 
 ```bash
-python example/build_2d_cylinder_case.py
+python -B case_editor/run_case_editor.py --case-dir path/to/case report
+python -B case_editor/run_case_editor.py --case-dir path/to/case validate
+python -B case_editor/run_case_editor.py --case-dir path/to/case sync --dry-run
+python -B geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case inspect --roundtrip
+python -B -m mesh.run_mesh_tools --case-dir path/to/case inspect
+python -B motion/run_motion_tools.py --case-dir path/to/case inspect
 ```
 
-For frontend/editor verification:
+Relevant regressions:
 
-```bash
-python -B picar_console.py path/to/case
-python -m http.server 8765 --bind 127.0.0.1
-```
+- `case_editor/test__control_sync.py`: narrow writes, incomplete canonical records.
+- `case_editor/test__probe.py`: node references, slice sampling, editing, diagnostics.
+- `case_editor/test__console_imports.py`: append/replace, swap, resample, extreme frames.
+- `mesh/test__mesh_generate.py`: reference stretching, rounded dense inference, Z.
+- `mesh/test__draw_meshcombine.py`: mesh plotting.
 
-Static editor paths are `geometry/unstructure_surface/editor/` and `mesh/editor/`.
+Use `python -B -m pytest -p no:cacheprovider <relevant files>` when pytest is
+available. If unavailable, report that and run suitable test functions with
+temporary-directory fixtures; do not claim pytest passed. UI verification also
+needs served HTML/JS/API consistency and visual/interaction checks when relevant.
 
-## Validation
+## Scope and safety
 
-Choose checks based on the blast radius:
+Large fort files should not be copied/rewritten for unrelated surface inspection.
+Template initialization skips them unless requested (`--include-large`). Confirm
+which operations write the active case; importing and removing are not previews.
+Keep derived outputs separate, and verify exact targets before overwrite.
 
-```bash
-python -m py_compile <files you modified>
-python -m compileall case_editor geometry/unstructure_surface mesh motion example
-python -m pytest mesh/test__mesh_generate.py mesh/test__draw_meshcombine.py
-```
-
-For generated or edited cases:
-
-```bash
-python case_editor/run_case_editor.py --case-dir path/to/case validate
-python geometry/unstructure_surface/run_surface_tools.py --case-dir path/to/case inspect --roundtrip
-python -m mesh.run_mesh_tools --case-dir path/to/case inspect
-```
-
-For motion changes, run `motion/run_motion_tools.py inspect` and compare `fort.*` node counts against the surface.
-
-If a test dependency such as `pytest` is unavailable, run the closest direct Python check and report the missing dependency.
-
-## Safety
-
-- Avoid silent overwrites of user case directories. Prefer explicit output directories for derived files.
-- Do not copy template `fort.*` files unless the user asks for large files or `--include-large`.
-- Preserve node ids and topology when only coordinate transforms are intended.
-- After modifying surfaces, always consider whether `canonical_body_in.dat`, `input.dat`, grids, or `fort.*` need matching updates.
-- `trim_surface_fort_box.py` copies a case and can replace an existing output directory only with `--overwrite`; validate the trimmed case afterward.
-- Do not assume an IDE tab means that file exists in the current repository; check with `rg --files` or an explicit file read first.
+Do not revive historical cloud-hosting, manifest, case-setup, or solver-submission
+proposals as implemented features. The references preserve useful decisions and
+known limitations, not authorization to modify external cases or submit jobs.

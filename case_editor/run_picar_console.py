@@ -6,6 +6,7 @@ import json
 import mimetypes
 import socket
 import sys
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -30,16 +31,16 @@ from case_editor.probe import (  # noqa: E402
     write_probe_file,
 )
 from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
-from geometry.unstructure_surface.surface import read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
+from geometry.unstructure_surface.surface import SurfaceBody, read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
-from motion.fort import fort_motion_info  # noqa: E402
+from motion.fort import fort_motion_info, resample_fort_motion, swap_fort_yz  # noqa: E402
 from motion.project import MotionProject  # noqa: E402
-from motion.visualize import motion_points_for_frames  # noqa: E402
+from motion.visualize import motion_envelope_frame_indices, motion_points_for_frames, sample_frame_indices  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "fort-undeformed1"
+CONSOLE_API_VERSION = "fort-resample1"
 DENSE_UNIFORM_RATIO = 1.05
 DENSE_SPACING_TOLERANCE = 0.02
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
@@ -95,8 +96,12 @@ def make_handler(default_case_dir: Path):
                         "ok": True,
                         "api_version": CONSOLE_API_VERSION,
                         "origin_shift": True,
+                        "surface_append": True,
                         "geometry_transform": True,
+                        "geometry_yz_swap": True,
                         "fort_preview": True,
+                        "fort_import": True,
+                        "fort_resample": True,
                         "fort_remove": True,
                         "fort_undeformed": True,
                         "control_sync": True,
@@ -218,10 +223,7 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
     if path in {"/api/setup-sync/apply", "/api/input-sync/apply", "/api/control-sync/apply"}:
         return _setup_sync_payload(case_dir, payload, apply=True)
     if path == "/api/geometry/save-surface":
-        content = str(payload.get("content") or "")
-        out = case_dir / str(payload.get("surface_name") or "unstruc_surface_in.dat")
-        out.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": str(out), "report": _case_report(case_dir)}
+        return _save_surface_payload(case_dir, payload)
     if path == "/api/geometry/import-stl":
         filename = Path(str(payload.get("filename") or "uploaded.stl")).name
         data_b64 = str(payload.get("content_base64") or "")
@@ -231,8 +233,9 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         stl_path = case_dir / filename
         stl_path.write_bytes(base64.b64decode(data_b64))
         project = SurfaceProject(case_dir)
-        out, bodies = project.convert_stl([stl_path], append=bool(payload.get("append")))
-        return {"ok": True, "stl_path": str(stl_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
+        mode = _payload_import_mode(payload)
+        out, bodies = project.convert_stl([stl_path], append=mode == "append")
+        return {"ok": True, "mode": mode, "stl_path": str(stl_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
     if path == "/api/geometry/import-obj":
         filename = Path(str(payload.get("filename") or "uploaded.obj")).name
         data_b64 = str(payload.get("content_base64") or "")
@@ -242,8 +245,9 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         obj_path = case_dir / filename
         obj_path.write_bytes(base64.b64decode(data_b64))
         project = SurfaceProject(case_dir)
-        out, bodies = project.convert_obj([obj_path], append=bool(payload.get("append")))
-        return {"ok": True, "obj_path": str(obj_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
+        mode = _payload_import_mode(payload)
+        out, bodies = project.convert_obj([obj_path], append=mode == "append")
+        return {"ok": True, "mode": mode, "obj_path": str(obj_path), "surface_path": str(out), "bodies": len(bodies), "report": _case_report(case_dir)}
     if path == "/api/geometry/export-stl":
         output = str(payload.get("output") or "surface_export.stl")
         out, bodies = SurfaceProject(case_dir).export_stl(output=output, body_ids=_payload_body_ids(payload))
@@ -260,6 +264,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
             scale=float(scale),
         )
         return {"ok": True, "path": str(out), "bodies": _json_ready(summarize_surface(bodies)), "report": _case_report(case_dir)}
+    if path == "/api/geometry/swap-yz-fort":
+        return _swap_yz_surface_fort_payload(case_dir, payload)
     if path == "/api/geometry/remove-bodies":
         body_ids = set(_payload_body_ids(payload) or [])
         if not body_ids:
@@ -271,6 +277,10 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         return {"ok": True, "path": str(project.surface_path), "bodies": _json_ready(summarize_surface(kept)), "report": _case_report(case_dir)}
     if path == "/api/fort/preview":
         return _fort_preview_payload(case_dir, payload)
+    if path == "/api/fort/import":
+        return _import_fort_payload(case_dir, payload)
+    if path == "/api/fort/resample":
+        return _resample_fort_payload(case_dir, payload)
     if path == "/api/fort/export-undeformed":
         return _fort_export_undeformed_payload(case_dir, payload)
     if path == "/api/fort/remove":
@@ -337,6 +347,75 @@ def _payload_vec3(payload: dict[str, object], key: str):
     if not isinstance(raw, list) or len(raw) != 3:
         raise ValueError(f"{key} must be a 3-value list")
     return tuple(float(item) for item in raw)
+
+
+def _payload_import_mode(payload: dict[str, object]) -> str:
+    raw_mode = str(payload.get("mode") or "").strip().lower()
+    if raw_mode in {"replace", "append"}:
+        return raw_mode
+    if raw_mode == "add":
+        return "append"
+    return "append" if bool(payload.get("append")) else "replace"
+
+
+def _payload_optional_positive_int(payload: dict[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None or value == "":
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError(f"{key} must be positive")
+    return parsed
+
+
+def _case_file_name(value: object, default: str) -> str:
+    name = Path(str(value or default)).name
+    if not name:
+        raise ValueError("Missing file name")
+    return name
+
+
+def _write_temp_upload(case_dir: Path, data: str | bytes, prefix: str, suffix: str) -> Path:
+    case_dir.mkdir(parents=True, exist_ok=True)
+    mode = "wb" if isinstance(data, bytes) else "w"
+    kwargs = {"dir": case_dir, "prefix": prefix, "suffix": suffix, "delete": False}
+    if isinstance(data, bytes):
+        with tempfile.NamedTemporaryFile(mode, **kwargs) as stream:
+            stream.write(data)
+            return Path(stream.name)
+    with tempfile.NamedTemporaryFile(mode, encoding="utf-8", **kwargs) as stream:
+        stream.write(data)
+        return Path(stream.name)
+
+
+def _save_surface_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    content = str(payload.get("content") or "")
+    if not content.strip():
+        raise ValueError("Missing surface content")
+
+    mode = _payload_import_mode(payload)
+    surface_name = _case_file_name(payload.get("surface_name"), "unstruc_surface_in.dat")
+    project = SurfaceProject(case_dir, surface_name=surface_name)
+    temp_path = _write_temp_upload(case_dir, content, "surface_upload_", ".dat")
+    try:
+        imported = read_surface(temp_path)
+        if not imported:
+            raise ValueError("Uploaded surface contains no bodies")
+        existing = project.load(required=False) if mode == "append" else []
+        bodies = existing + imported
+        out = project.save(bodies)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    return {
+        "ok": True,
+        "mode": mode,
+        "path": str(out),
+        "imported_bodies": len(imported),
+        "bodies": len(bodies),
+        "report": _case_report(case_dir),
+    }
 
 
 def _case_report(case_dir: Path) -> dict[str, object]:
@@ -663,6 +742,297 @@ def _format_amr_number(value: float) -> str:
     return f"{float(value):.10g}"
 
 
+def _swap_yz_surface_fort_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    body_ids = sorted(set(_payload_body_ids(payload) or []))
+    if not body_ids:
+        raise ValueError("Select at least one body to swap")
+    fort_start = int(payload.get("fort_start") or 41)
+    if fort_start <= 0:
+        raise ValueError("fort_start must be positive")
+    component_order = str(payload.get("component_order") or "xyz")
+    require_fort = bool(payload.get("require_fort", True))
+
+    surface_name = _case_file_name(payload.get("surface_name"), "unstruc_surface_in.dat")
+    surface_path = case_dir / surface_name
+    bodies = read_surface(surface_path)
+    for body_id in body_ids:
+        if body_id < 1 or body_id > len(bodies):
+            raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
+
+    fort_items = []
+    missing_fort = []
+    for body_id in body_ids:
+        fort_path = case_dir / f"fort.{fort_start + body_id - 1}"
+        if not fort_path.exists():
+            missing_fort.append(fort_path.name)
+            continue
+        if not fort_path.is_file():
+            raise ValueError(f"Not a file: {fort_path}")
+        info = fort_motion_info(fort_path)
+        surface_nodes = bodies[body_id - 1].node_count
+        fort_items.append(
+            {
+                "body": body_id,
+                "path": fort_path,
+                "name": fort_path.name,
+                "before": info,
+                "surface_nodes": surface_nodes,
+                "node_match": info.node_count == surface_nodes,
+            }
+        )
+    if missing_fort and require_fort:
+        raise FileNotFoundError(f"Missing fort files for selected bodies: {', '.join(missing_fort)}")
+
+    target_ids = set(body_ids)
+    swapped_bodies = [
+        _swap_surface_body_yz(body) if body_id in target_ids else body
+        for body_id, body in enumerate(bodies, start=1)
+    ]
+
+    temp_surface = _write_temp_upload(case_dir, "", "surface_swap_yz_", ".dat")
+    temp_forts: list[tuple[dict[str, object], Path, object]] = []
+    try:
+        write_surface(temp_surface, swapped_bodies)
+        read_surface(temp_surface)
+        for item in fort_items:
+            temp_fort = _write_temp_upload(case_dir, b"", f"{item['name']}.swap_yz_", ".tmp")
+            after = swap_fort_yz(item["path"], temp_fort, component_order=component_order)
+            temp_forts.append((item, temp_fort, after))
+
+        temp_surface.replace(surface_path)
+        written_forts = []
+        for item, temp_fort, after in temp_forts:
+            temp_fort.replace(item["path"])
+            written_forts.append(
+                {
+                    "body": item["body"],
+                    "name": item["name"],
+                    "path": str(item["path"]),
+                    "nodes": after.node_count,
+                    "frames": after.frame_count,
+                    "node_match": item["node_match"],
+                    "surface_nodes": item["surface_nodes"],
+                }
+            )
+    finally:
+        if temp_surface.exists():
+            temp_surface.unlink()
+        for _, temp_fort, _ in temp_forts:
+            if temp_fort.exists():
+                temp_fort.unlink()
+
+    return {
+        "ok": True,
+        "surface_path": str(surface_path),
+        "body_ids": body_ids,
+        "bodies": _json_ready(summarize_surface(swapped_bodies)),
+        "forts": written_forts,
+        "missing_fort": missing_fort,
+        "component_order": component_order,
+        "report": _case_report(case_dir),
+    }
+
+
+def _swap_surface_body_yz(body: SurfaceBody) -> SurfaceBody:
+    nodes = body.nodes.copy()
+    nodes[:, [2, 3]] = nodes[:, [3, 2]]
+    elems = body.elems.copy()
+    if elems.size:
+        elems[:, [2, 3]] = elems[:, [3, 2]]
+    return SurfaceBody(nodes=nodes, elems=elems, bbox=body.bbox)
+
+
+def _import_fort_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    data = _decode_upload_base64(payload.get("content_base64"), "fort")
+    mode = _payload_import_mode(payload)
+    fort_start = int(payload.get("fort_start") or 41)
+    if fort_start <= 0:
+        raise ValueError("fort_start must be positive")
+
+    requested_body_id = _payload_optional_positive_int(payload, "body_id")
+    target_name = str(payload.get("target_name") or "").strip()
+    if target_name:
+        requested_body_id = _body_id_from_fort_name(target_name, fort_start)
+
+    auto_rename = bool(payload.get("auto_rename", mode == "append"))
+    if mode == "replace":
+        body_id = requested_body_id or 1
+    elif auto_rename:
+        body_id = _next_available_fort_body_id(case_dir, fort_start, start_body_id=requested_body_id)
+    else:
+        if requested_body_id is None:
+            raise ValueError("Set a body id or enable auto rename before adding a fort file")
+        body_id = requested_body_id
+
+    fort_number = fort_start + body_id - 1
+    target_path = case_dir / f"fort.{fort_number}"
+    if mode == "append" and target_path.exists():
+        if not auto_rename:
+            raise FileExistsError(f"{target_path.name} already exists; choose another body id or enable auto rename")
+        body_id = _next_available_fort_body_id(case_dir, fort_start, start_body_id=body_id + 1)
+        fort_number = fort_start + body_id - 1
+        target_path = case_dir / f"fort.{fort_number}"
+
+    temp_path = _write_temp_upload(case_dir, data, "fort_upload_", ".tmp")
+    try:
+        upload_info = fort_motion_info(temp_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    case_dir.mkdir(parents=True, exist_ok=True)
+    replaced = target_path.exists()
+    target_path.write_bytes(data)
+    info = fort_motion_info(target_path)
+    surface_nodes = _surface_node_count_for_body(case_dir, body_id)
+    return {
+        "ok": True,
+        "mode": mode,
+        "body": body_id,
+        "fort_number": fort_number,
+        "name": target_path.name,
+        "path": str(target_path),
+        "original_name": _case_file_name(payload.get("filename"), "uploaded.fort"),
+        "replaced": replaced,
+        "auto_renamed": requested_body_id is None or fort_number != fort_start + (requested_body_id or body_id) - 1,
+        "info": {
+            "nodes": info.node_count,
+            "frames": info.frame_count,
+            "dt": info.dt,
+            "first_time": info.first_time,
+            "last_time": info.last_time,
+            "node_match": surface_nodes is None or surface_nodes == info.node_count,
+            "surface_nodes": surface_nodes,
+        },
+        "validated_upload": {
+            "nodes": upload_info.node_count,
+            "frames": upload_info.frame_count,
+        },
+        "report": _case_report(case_dir),
+    }
+
+
+def _resample_fort_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    body_id = int(payload.get("body_id") or 1)
+    if body_id <= 0:
+        raise ValueError("body_id must be positive")
+    fort_start = int(payload.get("fort_start") or 41)
+    if fort_start <= 0:
+        raise ValueError("fort_start must be positive")
+    target_steps = int(payload.get("target_steps_per_cycle") or payload.get("target_steps") or 0)
+    if target_steps <= 0:
+        raise ValueError("target_steps_per_cycle must be positive")
+    source_steps = _payload_optional_positive_int(payload, "source_steps_per_cycle")
+    component_order = str(payload.get("component_order") or "xyz")
+
+    fort_path = case_dir / f"fort.{fort_start + body_id - 1}"
+    if not fort_path.exists():
+        raise FileNotFoundError(f"Motion file not found for body {body_id}: {fort_path}")
+    before = fort_motion_info(fort_path)
+    effective_source_steps = source_steps or before.frame_count
+    if before.frame_count % effective_source_steps != 0:
+        raise ValueError(f"{fort_path.name} has {before.frame_count} frames, not a whole number of {effective_source_steps}-step cycles")
+
+    temp_fort = _write_temp_upload(case_dir, b"", f"{fort_path.name}.resample_", ".tmp")
+    try:
+        after = resample_fort_motion(
+            fort_path,
+            temp_fort,
+            source_steps_per_cycle=source_steps,
+            target_steps_per_cycle=target_steps,
+            component_order=component_order,
+        )
+        temp_fort.replace(fort_path)
+    finally:
+        if temp_fort.exists():
+            temp_fort.unlink()
+
+    surface_nodes = _surface_node_count_for_body(case_dir, body_id)
+    return {
+        "ok": True,
+        "body": body_id,
+        "name": fort_path.name,
+        "path": str(fort_path),
+        "component_order": component_order,
+        "source_steps_per_cycle": effective_source_steps,
+        "target_steps_per_cycle": target_steps,
+        "cycles": before.frame_count // effective_source_steps,
+        "before": {
+            "nodes": before.node_count,
+            "frames": before.frame_count,
+            "dt": before.dt,
+            "first_time": before.first_time,
+            "last_time": before.last_time,
+        },
+        "after": {
+            "nodes": after.node_count,
+            "frames": after.frame_count,
+            "dt": after.dt,
+            "first_time": after.first_time,
+            "last_time": after.last_time,
+            "node_match": surface_nodes is None or surface_nodes == after.node_count,
+            "surface_nodes": surface_nodes,
+        },
+        "report": _case_report(case_dir),
+    }
+
+
+def _decode_upload_base64(value: object, label: str) -> bytes:
+    data_b64 = str(value or "")
+    if not data_b64:
+        raise ValueError(f"Missing {label} content")
+    data = base64.b64decode(data_b64, validate=True)
+    if not data:
+        raise ValueError(f"Uploaded {label} file is empty")
+    return data
+
+
+def _body_id_from_fort_name(name: str, fort_start: int) -> int:
+    target = Path(name).name
+    if not target.startswith("fort."):
+        raise ValueError("Fort target name must look like fort.41")
+    suffix = target.split(".", 1)[1]
+    if not suffix.isdigit():
+        raise ValueError("Fort target name must end with a numeric suffix")
+    body_id = int(suffix) - int(fort_start) + 1
+    if body_id <= 0:
+        raise ValueError(f"{target} is before fort_start {fort_start}")
+    return body_id
+
+
+def _next_available_fort_body_id(case_dir: Path, fort_start: int, start_body_id: int | None = None) -> int:
+    occupied = {int(item["body"]) for item in _indexed_fort_files(case_dir, fort_start)}
+    surface_count = _surface_body_count(case_dir)
+    if start_body_id is not None:
+        body_id = max(1, int(start_body_id))
+        while body_id in occupied:
+            body_id += 1
+        return body_id
+
+    max_body = max([surface_count, *occupied], default=0)
+    for body_id in range(1, max_body + 1):
+        if body_id not in occupied:
+            return body_id
+    return max_body + 1
+
+
+def _surface_body_count(case_dir: Path) -> int:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        return 0
+    return len(read_surface(surface_path))
+
+
+def _surface_node_count_for_body(case_dir: Path, body_id: int) -> int | None:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        return None
+    bodies = read_surface(surface_path)
+    if body_id < 1 or body_id > len(bodies):
+        return None
+    return bodies[body_id - 1].node_count
+
+
 def _fort_report(case_dir: Path, fort_start: int = 41) -> dict[str, object]:
     surface_bodies = read_surface(case_dir / "unstruc_surface_in.dat") if (case_dir / "unstruc_surface_in.dat").exists() else []
     files = []
@@ -726,7 +1096,17 @@ def _fort_preview_payload(case_dir: Path, payload: dict[str, object]) -> dict[st
     if frame < 0 or frame >= info.frame_count:
         raise ValueError(f"frame must be in [-{info.frame_count}, {info.frame_count - 1}], got {payload.get('frame')}")
 
-    frame_indices = _fort_preview_frame_indices(info.frame_count, samples, frame)
+    frame_indices = sample_frame_indices(
+        info.frame_count,
+        samples,
+        highlight_frame=frame,
+        required_frames=motion_envelope_frame_indices(
+            body,
+            fort_path,
+            component_order=component_order,
+            motion_mode=motion_mode,
+        ),
+    )
     point_frames, times = motion_points_for_frames(
         body,
         fort_path,
@@ -858,17 +1238,6 @@ def _indexed_fort_files(case_dir: Path, fort_start: int) -> list[dict[str, objec
             continue
         files.append({"body": body_id, "fort_number": fort_number, "path": path})
     return sorted(files, key=lambda item: int(item["body"]))
-
-
-def _fort_preview_frame_indices(frame_count: int, samples: int, highlight_frame: int) -> list[int]:
-    if frame_count <= 0:
-        return []
-    samples = max(1, min(int(samples), int(frame_count)))
-    indices = np.linspace(0, frame_count - 1, samples, dtype=int).tolist()
-    if highlight_frame not in indices:
-        nearest = min(range(len(indices)), key=lambda idx: abs(indices[idx] - highlight_frame))
-        indices[nearest] = int(highlight_frame)
-    return sorted(set(indices))
 
 
 def _mesh_input_payload(case_dir: Path) -> dict[str, object]:

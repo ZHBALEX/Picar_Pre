@@ -65,7 +65,7 @@
         </label>
         <div class="actions">
           <button id="importGeometry" type="button">Import</button>
-          <button id="appendGeometry" type="button">Append Mesh</button>
+          <button id="appendGeometry" type="button">Append Body</button>
           <button id="exportStl" type="button">Export STL</button>
         </div>
         <h2>Bodies</h2>
@@ -83,9 +83,10 @@
         <div class="actions">
           <label class="mini-field">Scale<input id="bodyScale" type="number" min="0.0001" step="0.01" value="1"></label>
           <button id="applyBodyTransform" type="button">Apply Body Transform</button>
+          <button id="swapBodyYzFort" type="button">Swap Y/Z + Fort</button>
           <button id="removeBodies" type="button">Remove Body</button>
         </div>
-        <p class="hint">STL/OBJ import writes `unstruc_surface_in.dat`; DAT import saves the dropped surface directly.</p>
+        <p class="hint">Import replaces `unstruc_surface_in.dat`; Append Body adds uploaded STL/OBJ/DAT bodies. Swap Y/Z also rewrites matching fort.NN files for selected bodies.</p>
       </section>
       <section id="meshPanel" class="control-panel">
         <h2>Mesh Setup</h2>
@@ -194,10 +195,29 @@
       </section>
       <section id="fortPanel" class="control-panel">
         <h2>Fort</h2>
+        <label class="field">
+          <span>Fort file</span>
+          <input id="fortFile" type="file">
+        </label>
+        <div class="grid two">
+          <label>Add as body<input id="fortImportBody" type="number" min="1" step="1" placeholder="auto"></label>
+          <label class="check-field"><input id="fortAutoName" type="checkbox" checked> Auto next free name</label>
+        </div>
+        <div class="actions">
+          <button id="replaceFort" type="button">Replace Fort</button>
+          <button id="appendFort" type="button">Add Fort</button>
+        </div>
         <div id="fortList" class="item-list"></div>
         <div class="grid two">
           <label>Body<select id="fortBody"></select></label>
           <label>Frame<input id="fortFrame" type="number" step="1" value="-1"></label>
+        </div>
+        <div class="grid two">
+          <label>Source cycle steps<input id="fortSourceSteps" type="number" min="1" step="1" placeholder="auto"></label>
+          <label>Target cycle steps<input id="fortTargetSteps" type="number" min="1" step="1" value="720"></label>
+        </div>
+        <div class="actions">
+          <button id="resampleFort" type="button">Resample Fort</button>
         </div>
         <label>Snapshots<input id="fortSamples" type="number" min="1" step="1" value="24"></label>
         <div class="grid two">
@@ -226,12 +246,12 @@
         <div class="actions">
           <button id="exportFortUndeformed" type="button">Export Undeformed</button>
         </div>
-        <p class="hint">Gray points are sampled fort snapshots; red is the selected frame.</p>
+        <p class="hint">Replace writes the selected body's fort.NN. Add Fort writes the first missing or next free fort.NN unless a body number is set.</p>
       </section>
       <section class="dropzone" id="dropzone">
         <input id="fileInput" type="file" multiple>
         <strong>Drop files here</strong>
-        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, or drop STL/OBJ to import</span>
+        <span>xgrid/ygrid/zgrid.dat, amr_in.dat, unstruc_surface_in.dat, fort.*, or drop STL/OBJ to import</span>
       </section>
       <section>
         <h2>Loaded Files</h2>
@@ -263,6 +283,6 @@
       </footer>
     </section>
   </main>
-  <script src="app.js?v=fort-undeformed1"></script>
+  <script src="app.js?v=fort-resample1"></script>
 </body>
 </html>
