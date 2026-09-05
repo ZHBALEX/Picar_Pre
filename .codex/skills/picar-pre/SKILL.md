@@ -17,6 +17,34 @@ python -B picar_console.py path/to/case
 The default case is `example/run_case`, not the 2D example. The server binds to
 `127.0.0.1`; if port 8765 is occupied, use the exact URL it prints.
 
+## Project memory and continuity
+
+Treat this skill and its references as the maintained record of prior Picar_Pre
+collaboration. They capture verified repository facts, user workflow preferences,
+accepted design decisions, rejected alternatives, known regressions, and relevant
+external-case lessons. Use them to continue development without asking the user to
+reconstruct earlier conversations.
+
+Apply this evidence order when records disagree:
+
+1. Current implementation, tests, and files in the active checkout.
+2. The user's latest explicit request and corrections.
+3. This skill's maintained guidance and references.
+4. Repository documentation and historical conversation anchors.
+
+Conversation history is evidence, not current state. Re-check code before acting,
+especially after a revert or later commit. Keep case-specific observations labeled
+as such; do not promote them to universal PICAR rules. Keep proposed, rejected,
+removed, and implemented behavior distinct. A historical task/thread id is only a
+provenance clue and is never proof that code is still present.
+
+When future work reveals a durable, non-obvious fact that would change later
+development decisions, update the narrowest relevant reference in the same change
+when practical. Record the reason and boundary, not a chronological chat summary.
+Do not store secrets, credentials, personal data, transient paths, speculative
+hypotheses, or generic coding advice. Avoid duplicating facts across references;
+route to one maintained source from the task table instead.
+
 ## Working conventions
 
 - Keep changes modular and small, with English code comments. Preserve unrelated

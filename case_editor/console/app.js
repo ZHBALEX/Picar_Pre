@@ -2844,43 +2844,14 @@
 
   function projectPoint(rect, x, y, z) {
     const b = state.bounds || { min: [-1, -1, -1], max: [1, 1, 1], span: 2 };
-    if (isPlaneView()) return projectPlanePoint(rect, x, y, z, b);
-    const cx = (b.min[0] + b.max[0]) / 2;
-    const cy = (b.min[1] + b.max[1]) / 2;
-    const cz = (b.min[2] + b.max[2]) / 2;
-    const px = x - cx;
-    const py = y - cy;
-    const pz = z - cz;
-    const basis = cameraBasis();
-    const scale = 0.78 * Math.min(rect.width, rect.height) / Math.max(b.span, 1e-12) * state.zoom;
-    return {
-      x: rect.width / 2 + state.panX + dot3([px, py, pz], basis.right) * scale,
-      y: rect.height / 2 + state.panY - dot3([px, py, pz], basis.up) * scale,
-      depth: dot3([px, py, pz], basis.forward),
-    };
+    return window.PicarViewportCore.projectPoint(rect, b, {
+      mode: state.viewMode, angleX: state.angleX, angleY: state.angleY,
+      zoom: state.zoom, panX: state.panX, panY: state.panY,
+    }, x, y, z);
   }
 
   function cameraBasis() {
-    const elevation = state.angleX;
-    const azimuth = state.angleY;
-    const cosElev = Math.cos(elevation);
-    if (Math.abs(cosElev) < 0.03) {
-      const topSign = elevation >= 0 ? 1 : -1;
-      return {
-        right: [1, 0, 0],
-        up: [0, topSign, 0],
-        forward: [0, 0, -topSign],
-      };
-    }
-    const camera = normalize3([
-      cosElev * Math.cos(azimuth),
-      cosElev * Math.sin(azimuth),
-      Math.sin(elevation),
-    ]);
-    const forward = [-camera[0], -camera[1], -camera[2]];
-    const right = normalize3(cross3(forward, [0, 0, 1]));
-    const up = normalize3(cross3(right, forward));
-    return { right, up, forward };
+    return window.PicarViewportCore.cameraBasis({ angleX: state.angleX, angleY: state.angleY });
   }
 
   function dot3(a, b) {

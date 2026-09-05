@@ -5,3 +5,9 @@ example/run_case/fort.*
 /mesh/examples
 /mesh/test_outputs
 /case_editor/test_outputs
+*.41
+*.42
+*.43
+*.44
+*.45
+/example/run_case_batch

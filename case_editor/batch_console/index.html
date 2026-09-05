@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Picar Batch Case Setup</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+<aside>
+  <h1>Batch Case Setup</h1><p class="hint">Independent workspace. Preview never writes; Create never overwrites.</p>
+  <label>Source case<input id="source"></label><div class="actions"><button id="loadBodies">Load Bodies</button></div>
+  <label>Output root<input id="output"></label><label>Case prefix<input id="casePrefix" value="case"></label>
+  <section><div class="section-title"><h2>Rigid body groups</h2><button id="addGroup" type="button">+ Group</button></div>
+    <p class="hint">Use IDs such as 2-4 or 2,3,4. Bodies in one group receive the same translation. Each axis accepts one value or one value per case.</p><div id="groups"></div>
+  </section>
+  <div class="actions"><button id="preview">Preview</button><button id="create" class="primary">Create Cases</button></div>
+  <section><h2>Cases / opacity gradient</h2><div id="cases"></div></section><pre id="status">Ready.</pre>
+</aside>
+<section class="view"><header class="toolbar"><strong>Batch Geometry</strong><div><button id="reset">Reset</button><button id="top">Top</button><button id="iso" class="active">ISO</button><button id="xy">XY</button><button id="xz">XZ</button><button id="yz">YZ</button><button id="fit">Fit</button></div></header><canvas id="canvas"></canvas><div class="badge">drag: rotate &middot; Ctrl-drag: pan &middot; wheel: zoom</div></section>
+</main><script src="shared/viewport_core.js"></script><script src="app.js"></script></body></html>

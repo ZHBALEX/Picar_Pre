@@ -96,6 +96,8 @@ The toolkit currently focuses on the solid/body workflow:
 - inspect marker/fluid probes from `probe_in.dat` in the console scene
 - validate a complete case directory
 
+![new: batch process](example/images/batch_process.png)
+
 ## Repository Layout
 
 ```text
