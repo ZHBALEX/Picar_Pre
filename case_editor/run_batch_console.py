@@ -13,7 +13,7 @@ from geometry.unstructure_surface.surface import read_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = Path(__file__).resolve().parent / "batch_console"
-BATCH_API_VERSION = "position-names-v3"
+BATCH_API_VERSION = "motion-center-v6"
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,22 +74,26 @@ def handle_api(path: str, payload: dict[str, object], default_case: Path) -> dic
     source = Path(str(payload.get("source_case") or default_case)).expanduser().resolve()
     output = Path(str(payload.get("output_root") or source.parent / f"{source.name}_batch")).expanduser().resolve()
     bodies = read_surface(source / "unstruc_surface_in.dat")
+    fort_start = int(payload.get("fort_start") or 41)
+    component_order = str(payload.get("component_order") or "xyz").lower()
     if path == "/api/source":
         return {
             "source_case": str(source),
             "output_root": str(output),
             "bodies": [
-                {"body_id": index, "node_count": body.node_count, "bounds": {"min": body.points.min(axis=0).tolist(), "max": body.points.max(axis=0).tolist()}}
+                {"body_id": index, "node_count": body.node_count, "fort": f"fort.{fort_start + index - 1}", "has_fort": (source / f"fort.{fort_start + index - 1}").is_file(), "bounds": {"min": body.points.min(axis=0).tolist(), "max": body.points.max(axis=0).tolist()}}
                 for index, body in enumerate(bodies, 1)
             ],
         }
     groups = parse_body_groups(payload.get("groups"), len(bodies))
     prefix = str(payload.get("case_prefix") or "case")
     if path == "/api/preview":
-        geometry = grouped_preview_payload(source, groups, prefix, output)
+        geometry = grouped_preview_payload(
+            source, groups, prefix, output, fort_start=fort_start, component_order=component_order
+        )
         return {"source_case": str(source), "output_root": str(output), **geometry}
     if path == "/api/create":
-        return {"created": [str(v.case_dir) for v in create_grouped_cases(source, output, groups, prefix)]}
+        return {"created": [str(v.case_dir) for v in create_grouped_cases(source, output, groups, prefix, fort_start=fort_start, component_order=component_order)]}
     raise ValueError(f"Unknown API route: {path}")
 
 

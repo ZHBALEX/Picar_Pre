@@ -7,8 +7,9 @@
   <label>Source case<input id="source"></label><div class="actions"><button id="loadBodies">Load Bodies</button></div>
   <label>Output root<input id="output"></label><label>Case prefix<input id="casePrefix" value="case"></label>
   <section><div class="section-title"><h2>Rigid body groups</h2><button id="addGroup" type="button">+ Group</button></div>
-    <p class="hint">Use IDs such as 2-4 or 2,3,4. Bodies in one group receive the same translation. Each axis accepts one value or one value per case.</p><div id="groups"></div>
+    <p class="hint">Use IDs such as 2-4 or 2,3,4. Bodies in one group receive the same translation and rotation. Each field accepts one value or one value per case. Rotation uses the cycle-average motion center recovered by integrating the group's fort files; matching fort vectors rotate with it.</p><div id="groups"></div>
   </section>
+  <div class="advanced-grid"><label>Fort start<input id="fortStart" type="number" min="1" value="41"></label><label>Fort components<input id="componentOrder" value="xyz" maxlength="3"></label></div>
   <div class="actions"><button id="preview">Preview</button><button id="create" class="primary">Create Cases</button></div>
   <section><h2>Cases / opacity gradient</h2><div id="cases"></div></section><pre id="status">Ready.</pre>
 </aside>

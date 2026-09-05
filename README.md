@@ -96,13 +96,113 @@ The toolkit currently focuses on the solid/body workflow:
 - inspect marker/fluid probes from `probe_in.dat` in the console scene
 - validate a complete case directory
 
-![new: batch process](example/images/batch_process.png)
+## Batch Case Setup
+
+`batch_console.py` is a separate workspace for producing related case variants
+without changing the active case in the main Picar Console. It copies one source
+case into new directories, previews all variants together, and applies coordinated
+translations or rotations to one or more rigid body groups.
+
+Launch it from the repository root:
+
+```powershell
+python -B batch_console.py path\to\source_case
+```
+
+Open the exact local URL printed in the terminal. The preferred port is `8775`;
+if it is occupied, the server selects another port. Restart the Python process
+after backend changes—the page checks its API version and reports an outdated
+server instead of mixing incompatible frontend and backend code.
+
+### Rigid body groups and case series
+
+A body group moves as one assembly. Enter `2-4` or `2,3,4`, for example, when
+three surface bodies are separate solver records but together form one fish.
+Each X/Y/Z or RX/RY/RZ field accepts either:
+
+- one value, which is broadcast to every generated case; or
+- one comma- or space-separated value per case.
+
+All non-singleton series must have the same length. For example:
+
+```text
+Case prefix : tunabot
+Body IDs    : 2-4
+X offsets   : 0
+Y offsets   : 0, 0.1, 0.2, 0.3, 0.4
+Z offsets   : 0
+RX/RY/RZ    : 0
+```
+
+produces:
+
+```text
+tunabot_BASE
+tunabot_YP0p1
+tunabot_YP0p2
+tunabot_YP0p3
+tunabot_YP0p4
+```
+
+`P` and `M` encode positive and negative values, and `p` replaces the decimal
+point (`Y+0.4 -> YP0p4`, `RZ-10 -> RZM10`). When multiple groups move in the
+same series, body ids are included in the suffix to keep names unambiguous.
+
+<p align="center">
+  <img src="example/images/batch_process.png" alt="Batch Case Setup multi-body translation sweep" width="650">
+</p>
+<p align="center"><sub>Body 2–5 grouped into one translation sweep; unchanged geometry is drawn once.</sub></p>
+
+### Preview and 3D controls
+
+`Preview` is read-only. It uses the same camera projection as the main console
+and supports ISO, Top, XY, XZ, and YZ views. Drag to rotate, Ctrl-drag to pan,
+and use the mouse wheel to zoom. Only sampled surface points are drawn: unchanged
+bodies appear once, while changed groups are overlaid from deep to light opacity.
+Individual variants can be hidden from the case list.
+
+### Rotation and prescribed motion
+
+RX/RY/RZ use the surface tools' XYZ Euler-angle convention in degrees. For a
+pitching/heaving body, its initial surface is an instantaneous phase and is not
+necessarily located at the motion center. The batch builder therefore integrates
+the group's fort trajectories and uses their node-weighted time-average center as
+the rotation pivot:
+
+```text
+surface: p' = c_motion + R (p - c_motion) + translation
+fort:    v' = R v
+```
+
+The default mapping is body 1 to `fort.41`; `Fort start` and fort component order
+are configurable. Every rotated body must have a matching, complete fort file
+with the same node count as its surface body. Preview reports the recovered motion
+center and maximum cycle drift. Motion-center results are cached using the source
+surface/fort metadata, so repeated previews do not rescan unchanged large files.
+Translation does not alter fort velocity vectors.
+
+### Creation and safety
+
+`Create Cases` copies the complete source directory and changes only the new
+copies. It refuses to overwrite an existing target directory, validates all
+rotated surface/fort mappings before copying, and removes directories created by
+the current operation if generation fails. Body order, node ids, topology, and
+canonical body counts remain unchanged.
+
+Grid, AMR, solver-input, and direct fluid-probe coordinates are copied as-is; the
+batch tool does not reposition them. Inspect their spatial coverage after a large
+translation or rotation. See
+[case_editor/batch_console/README.md](case_editor/batch_console/README.md) for the
+compact feature reference.
 
 ## Repository Layout
 
 ```text
 case_editor/
   Case-level workflow for input.dat, canonical bodies, grids, surfaces, and validation.
+
+batch_console.py
+  Standalone rigid-group batch-case setup and multi-case 3D preview.
 
 geometry/unstructure_surface/
   Boundary-surface pipeline for unstruc_surface_in.dat, including STL/OBJ conversion,
@@ -123,6 +223,7 @@ example/
 Detailed module documentation:
 
 - [case_editor/README.md](case_editor/README.md)
+- [case_editor/batch_console/README.md](case_editor/batch_console/README.md)
 - [geometry/unstructure_surface/README.md](geometry/unstructure_surface/README.md)
 - [mesh/README.md](mesh/README.md)
 - [motion/README.md](motion/README.md)

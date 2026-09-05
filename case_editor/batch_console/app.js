@@ -1,7 +1,7 @@
 (function () {
   const MAX_POINTS = 35000;
   const INTERACTIVE_POINTS = 8000;
-  const el = Object.fromEntries(["source", "output", "casePrefix", "loadBodies", "addGroup", "groups", "preview", "create", "cases", "status", "canvas", "reset", "top", "iso", "xy", "xz", "yz", "fit"].map(id => [id, document.getElementById(id)]));
+  const el = Object.fromEntries(["source", "output", "casePrefix", "fortStart", "componentOrder", "loadBodies", "addGroup", "groups", "preview", "create", "cases", "status", "canvas", "reset", "top", "iso", "xy", "xz", "yz", "fit"].map(id => [id, document.getElementById(id)]));
   const ctx = el.canvas.getContext("2d");
   const state = {
     staticBodies: [], cases: [], bounds: null,
@@ -15,8 +15,11 @@
       x: card.querySelector("[data-field=x]").value.trim(),
       y: card.querySelector("[data-field=y]").value.trim(),
       z: card.querySelector("[data-field=z]").value.trim(),
+      rx: card.querySelector("[data-field=rx]").value.trim(),
+      ry: card.querySelector("[data-field=ry]").value.trim(),
+      rz: card.querySelector("[data-field=rz]").value.trim(),
     }));
-    return { source_case: el.source.value.trim(), output_root: el.output.value.trim(), case_prefix: el.casePrefix.value.trim(), groups };
+    return { source_case: el.source.value.trim(), output_root: el.output.value.trim(), case_prefix: el.casePrefix.value.trim(), fort_start: Number(el.fortStart.value), component_order: el.componentOrder.value.trim(), groups };
   }
 
   async function post(path) {
@@ -37,7 +40,7 @@
       throw new Error("The batch backend is outdated. Stop it with Ctrl+C, then restart batch_console.py.");
     }
     const health = await response.json();
-    if (health.api_version !== "position-names-v3") {
+    if (health.api_version !== "motion-center-v6") {
       throw new Error(`The batch backend is outdated (${health.api_version || "unknown version"}). Stop it with Ctrl+C, then restart batch_console.py.`);
     }
   }
@@ -50,16 +53,16 @@
       el.source.value = result.source_case;
       el.output.value = result.output_root;
       if (!el.groups.children.length) addGroup("1", "0", "0.1, 0.2, 0.3, 0.4", "0");
-      setStatus(`${result.bodies.length} bodies available (1-${result.bodies.length})\n` + result.bodies.map(body => `Body ${body.body_id}: ${body.node_count.toLocaleString()} nodes`).join("\n"));
+      setStatus(`${result.bodies.length} bodies available (1-${result.bodies.length})\n` + result.bodies.map(body => `Body ${body.body_id}: ${body.node_count.toLocaleString()} nodes · ${body.has_fort ? body.fort : "no fort"}`).join("\n"));
     } catch (error) {
       setStatus(error.message || String(error));
     }
   }
 
-  function addGroup(bodyIds = "", x = "0", y = "0", z = "0") {
+  function addGroup(bodyIds = "", x = "0", y = "0", z = "0", rx = "0", ry = "0", rz = "0") {
     const card = document.createElement("div");
     card.className = "group-card";
-    card.innerHTML = `<div class="group-head"><label>Body IDs<input data-field="body_ids" value="${escapeHtml(bodyIds)}" placeholder="2-4"></label><button type="button">Remove</button></div><div class="axis-grid"><label>X offsets<input data-field="x" value="${escapeHtml(x)}"></label><label>Y offsets<input data-field="y" value="${escapeHtml(y)}"></label><label>Z offsets<input data-field="z" value="${escapeHtml(z)}"></label></div>`;
+    card.innerHTML = `<div class="group-head"><label>Body IDs<input data-field="body_ids" value="${escapeHtml(bodyIds)}" placeholder="2-4"></label><button type="button">Remove</button></div><div class="axis-grid"><label>X offsets<input data-field="x" value="${escapeHtml(x)}"></label><label>Y offsets<input data-field="y" value="${escapeHtml(y)}"></label><label>Z offsets<input data-field="z" value="${escapeHtml(z)}"></label></div><div class="axis-grid rotation-grid"><label>RX degrees<input data-field="rx" value="${escapeHtml(rx)}"></label><label>RY degrees<input data-field="ry" value="${escapeHtml(ry)}"></label><label>RZ degrees<input data-field="rz" value="${escapeHtml(rz)}"></label></div>`;
     card.querySelector("button").addEventListener("click", () => card.remove());
     el.groups.appendChild(card);
   }
@@ -81,7 +84,12 @@
       recomputeBounds();
       fit();
       const sent = state.staticBodies.reduce((sum, body) => sum + body.points.length, 0) + state.cases.reduce((sum, item) => sum + item.bodies.reduce((bodySum, body) => bodySum + body.points.length, 0), 0);
-      setStatus(`${state.cases.length} cases · ${sent.toLocaleString()} sampled points\nStatic bodies are drawn once. Preview wrote no files.`);
+      const pivots = (result.rotation_pivots || []).map(item => {
+        const center = item.center.map(value => Number(value).toPrecision(7)).join(", ");
+        const drift = Math.max(...item.forts.map(fort => fort.max_cycle_drift));
+        return `Bodies ${item.body_ids.join(",")}: motion center [${center}], max cycle drift ${drift.toExponential(3)}`;
+      });
+      setStatus(`${state.cases.length} cases · ${sent.toLocaleString()} sampled points\n${pivots.join("\n")}\nStatic bodies are drawn once. Preview wrote no files.`);
     } catch (error) {
       setStatus(error.message || String(error));
     }

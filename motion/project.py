@@ -181,6 +181,35 @@ class MotionProject:
         write_surface(out, exported)
         return out, exported, stats
 
+    def cycle_average_group_center(
+        self,
+        body_ids: list[int],
+        *,
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
+    ) -> tuple[np.ndarray, list[UndeformedBodyStats]]:
+        """Return the node-weighted center of selected bodies over their fort cycle."""
+        bodies = read_surface(self.surface_path)
+        target_ids = sorted(self._target_body_ids(body_ids, len(bodies)))
+        point_sum = np.zeros(3, dtype=float)
+        point_count = 0
+        stats: list[UndeformedBodyStats] = []
+        for body_id in target_ids:
+            body = bodies[body_id - 1]
+            average, body_stats = self._cycle_average_body_points(
+                body_id,
+                body,
+                self.fort_path_for_body(body_id),
+                component_order=component_order,
+                motion_mode=motion_mode,
+            )
+            point_sum += average.sum(axis=0)
+            point_count += body.node_count
+            stats.append(body_stats)
+        if point_count <= 0:
+            raise ValueError("Cannot compute a motion center for an empty body group")
+        return point_sum / float(point_count), stats
+
     def view(
         self,
         body_id: int,

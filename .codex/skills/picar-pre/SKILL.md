@@ -73,6 +73,7 @@ are repository-relative unless explicitly identified as external.
 | Probe generation, positioning, spacing, file parsing | `case_editor/probe.py`; [probes](references/probes.md) |
 | fort parsing, preview, resample, Y/Z swap, neutral surface | `motion/fort.py`, `motion/project.py`, `motion/visualize.py`; [motion](references/motion.md) |
 | Previous batch pitching/heaving phase cases | External `foil_pitching_PhaseChange` project; [phase workflow](references/phase-workflow.md) |
+| Batch case translation/rotation groups and overlay preview | `batch_console.py`, `case_editor/batch_case_setup.py`; [batch cases](references/batch-cases.md) |
 | Whole-case generation | `case_editor.workflow.build_case(config)`, `example/build_2d_cylinder_case.py` |
 | Box trimming of geometry and matching fort nodes | `trim_surface_fort_box.py`; [formats and synchronization](references/formats-sync.md) |
 

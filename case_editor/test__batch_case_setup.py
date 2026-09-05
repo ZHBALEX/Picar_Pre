@@ -1,4 +1,5 @@
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 import numpy as np
@@ -13,11 +14,21 @@ from case_editor.batch_case_setup import (
 )
 from case_editor.run_batch_console import BATCH_API_VERSION
 from geometry.unstructure_surface.surface import SurfaceBody, read_surface, write_surface
+from motion.fort import read_frame
+
+
+def write_test_fort(path: Path, node_count: int, vector: tuple[float, float, float] | list[tuple[float, float, float]]) -> None:
+    frame_vectors = [vector] if isinstance(vector, tuple) else vector
+    with path.open("wb") as stream:
+        for frame_index, frame_vector in enumerate(frame_vectors):
+            stream.write(struct.pack("<iddii", 20, 0.01, (frame_index + 1) * 0.01, node_count, 20))
+            for _ in range(node_count):
+                stream.write(struct.pack("<i3di", 24, *frame_vector, 24))
 
 
 class BatchCaseSetupTests(unittest.TestCase):
     def test_batch_api_version_identifies_point_cloud_schema(self):
-        self.assertEqual(BATCH_API_VERSION, "position-names-v3")
+        self.assertEqual(BATCH_API_VERSION, "motion-center-v6")
 
     def test_body_range_moves_as_one_rigid_group(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -53,6 +64,30 @@ class BatchCaseSetupTests(unittest.TestCase):
         ], 4)
         variants = plan_grouped_variants("output", groups, "pair")
         self.assertEqual(variants[0].name, "pair_B1_XP0p1_B2-4_YP0p4")
+
+    def test_rotation_uses_cycle_average_motion_center_and_rotates_fort(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir); source = root / "source"; source.mkdir()
+            body = SurfaceBody(np.array([[1,0.,0.,0.],[2,1.,0.,0.],[3,0.,1.,0.]]), np.array([[1,1,2,3]]))
+            write_surface(source / "unstruc_surface_in.dat", [body])
+            write_test_fort(source / "fort.41", 3, [(0.0, 1.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0), (0.0, -1.0, 0.0)])
+            groups = parse_body_groups([{"body_ids":"1", "rz":"180"}], 1)
+            variants = create_grouped_cases(source, root / "batch", groups, "fish")
+            self.assertEqual(variants[0].name, "fish_RZP180")
+            moved = read_surface(variants[0].case_dir / "unstruc_surface_in.dat")[0]
+            expected_center = body.points.mean(axis=0) + np.array([0.0, 0.02, 0.0])
+            np.testing.assert_allclose(moved.points.mean(axis=0), expected_center, atol=1e-12)
+            _header, vectors = read_frame(variants[0].case_dir / "fort.41", 0)
+            np.testing.assert_allclose(vectors, np.tile([0.0, -1.0, 0.0], (3, 1)), atol=1e-12)
+
+    def test_rotation_requires_matching_fort(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir); source = root / "source"; source.mkdir()
+            body = SurfaceBody(np.array([[1,0.,0.,0.],[2,1.,0.,0.],[3,0.,1.,0.]]), np.array([[1,1,2,3]]))
+            write_surface(source / "unstruc_surface_in.dat", [body])
+            groups = parse_body_groups([{"body_ids":"1", "rx":"10"}], 1)
+            with self.assertRaisesRegex(FileNotFoundError, "Rotation requires matching motion file"):
+                create_grouped_cases(source, root / "batch", groups)
 
     def test_copy_and_translate_only_selected_body(self):
         with tempfile.TemporaryDirectory() as temp_dir:
