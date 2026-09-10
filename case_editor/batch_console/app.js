@@ -1,10 +1,12 @@
 (function () {
   const MAX_POINTS = 35000;
   const INTERACTIVE_POINTS = 8000;
-  const el = Object.fromEntries(["source", "output", "casePrefix", "fortStart", "componentOrder", "loadBodies", "addGroup", "groups", "preview", "create", "cases", "status", "canvas", "reset", "top", "iso", "xy", "xz", "yz", "fit"].map(id => [id, document.getElementById(id)]));
+  const MAX_GRID_LINES = 48;
+  const AMR_COLORS = ["#d62828", "#2f80ed", "#f59f00", "#7b2cbf", "#2b9348", "#d9480f"];
+  const el = Object.fromEntries(["source", "output", "casePrefix", "fortStart", "componentOrder", "loadBodies", "addGroup", "groups", "preview", "create", "cases", "status", "canvas", "showMeshBounds", "showDenseRegion", "showFullMesh", "showAmrRegions", "reset", "top", "iso", "xy", "xz", "yz", "fit"].map(id => [id, document.getElementById(id)]));
   const ctx = el.canvas.getContext("2d");
   const state = {
-    staticBodies: [], cases: [], bounds: null,
+    staticBodies: [], staticAmrBlocks: [], cases: [], mesh: null, amr: null, bounds: null,
     viewMode: "iso", angleX: 0.62, angleY: -0.78, zoom: 1, panX: 0, panY: 0,
     dragging: false, dragMode: null, lastX: 0, lastY: 0, framePending: false, interactingUntil: 0,
   };
@@ -18,6 +20,7 @@
       rx: card.querySelector("[data-field=rx]").value.trim(),
       ry: card.querySelector("[data-field=ry]").value.trim(),
       rz: card.querySelector("[data-field=rz]").value.trim(),
+      amr_blocks: card.querySelector("[data-field=amr_blocks]").value.trim(),
     }));
     return { source_case: el.source.value.trim(), output_root: el.output.value.trim(), case_prefix: el.casePrefix.value.trim(), fort_start: Number(el.fortStart.value), component_order: el.componentOrder.value.trim(), groups };
   }
@@ -40,7 +43,7 @@
       throw new Error("The batch backend is outdated. Stop it with Ctrl+C, then restart batch_console.py.");
     }
     const health = await response.json();
-    if (health.api_version !== "motion-center-v6") {
+    if (health.api_version !== "mesh-amr-v7") {
       throw new Error(`The batch backend is outdated (${health.api_version || "unknown version"}). Stop it with Ctrl+C, then restart batch_console.py.`);
     }
   }
@@ -53,16 +56,21 @@
       el.source.value = result.source_case;
       el.output.value = result.output_root;
       if (!el.groups.children.length) addGroup("1", "0", "0.1, 0.2, 0.3, 0.4", "0");
-      setStatus(`${result.bodies.length} bodies available (1-${result.bodies.length})\n` + result.bodies.map(body => `Body ${body.body_id}: ${body.node_count.toLocaleString()} nodes · ${body.has_fort ? body.fort : "no fort"}`).join("\n"));
+      state.mesh = result.mesh || null;
+      state.amr = result.amr || null;
+      const movingBlocks = result.amr ? result.amr.layers.flatMap(layer => layer.blocks).filter(block => Number(block.moving) !== 0).map(block => block.id) : [];
+      const meshText = result.mesh ? `mesh ${result.mesh.x.length}x${result.mesh.y.length}x${Math.max(1, result.mesh.z.length)}` : "no grid";
+      const amrText = `AMR ${result.amr ? result.amr.block_count || 0 : 0} blocks${movingBlocks.length ? ` (moving: ${movingBlocks.join(",")})` : ""}`;
+      setStatus(`${result.bodies.length} bodies available (1-${result.bodies.length}) · ${meshText} · ${amrText}\n` + result.bodies.map(body => `Body ${body.body_id}: ${body.node_count.toLocaleString()} nodes · ${body.has_fort ? body.fort : "no fort"}`).join("\n"));
     } catch (error) {
       setStatus(error.message || String(error));
     }
   }
 
-  function addGroup(bodyIds = "", x = "0", y = "0", z = "0", rx = "0", ry = "0", rz = "0") {
+  function addGroup(bodyIds = "", x = "0", y = "0", z = "0", rx = "0", ry = "0", rz = "0", amrBlocks = "") {
     const card = document.createElement("div");
     card.className = "group-card";
-    card.innerHTML = `<div class="group-head"><label>Body IDs<input data-field="body_ids" value="${escapeHtml(bodyIds)}" placeholder="2-4"></label><button type="button">Remove</button></div><div class="axis-grid"><label>X offsets<input data-field="x" value="${escapeHtml(x)}"></label><label>Y offsets<input data-field="y" value="${escapeHtml(y)}"></label><label>Z offsets<input data-field="z" value="${escapeHtml(z)}"></label></div><div class="axis-grid rotation-grid"><label>RX degrees<input data-field="rx" value="${escapeHtml(rx)}"></label><label>RY degrees<input data-field="ry" value="${escapeHtml(ry)}"></label><label>RZ degrees<input data-field="rz" value="${escapeHtml(rz)}"></label></div>`;
+    card.innerHTML = `<div class="group-head"><label>Body IDs<input data-field="body_ids" value="${escapeHtml(bodyIds)}" placeholder="2-4"></label><button type="button">Remove</button></div><div class="axis-grid"><label>X offsets<input data-field="x" value="${escapeHtml(x)}"></label><label>Y offsets<input data-field="y" value="${escapeHtml(y)}"></label><label>Z offsets<input data-field="z" value="${escapeHtml(z)}"></label></div><div class="axis-grid rotation-grid"><label>RX degrees<input data-field="rx" value="${escapeHtml(rx)}"></label><label>RY degrees<input data-field="ry" value="${escapeHtml(ry)}"></label><label>RZ degrees<input data-field="rz" value="${escapeHtml(rz)}"></label></div><label class="amr-follow">AMR blocks following this translation<input data-field="amr_blocks" value="${escapeHtml(amrBlocks)}" placeholder="blank, moving, all, or 1,3-4"></label>`;
     card.querySelector("button").addEventListener("click", () => card.remove());
     el.groups.appendChild(card);
   }
@@ -78,6 +86,9 @@
         throw new Error("Unexpected preview response. Stop the batch server with Ctrl+C and restart batch_console.py.");
       }
       state.staticBodies = result.static_bodies;
+      state.staticAmrBlocks = Array.isArray(result.static_amr_blocks) ? result.static_amr_blocks : [];
+      state.mesh = result.mesh || null;
+      state.amr = result.amr || null;
       const count = Math.max(1, result.cases.length - 1);
       state.cases = result.cases.map((item, index) => ({ ...item, visible: true, opacity: 0.88 - 0.72 * index / count }));
       renderCaseList();
@@ -89,7 +100,9 @@
         const drift = Math.max(...item.forts.map(fort => fort.max_cycle_drift));
         return `Bodies ${item.body_ids.join(",")}: motion center [${center}], max cycle drift ${drift.toExponential(3)}`;
       });
-      setStatus(`${state.cases.length} cases · ${sent.toLocaleString()} sampled points\n${pivots.join("\n")}\nStatic bodies are drawn once. Preview wrote no files.`);
+      const followedAmr = state.cases.length && Array.isArray(state.cases[0].amr_blocks) ? state.cases[0].amr_blocks.length : 0;
+      const environment = `${state.mesh ? "grid loaded" : "no grid"} · AMR ${state.amr ? state.amr.block_count || 0 : 0} blocks${followedAmr ? `, ${followedAmr} following each case` : ""}`;
+      setStatus(`${state.cases.length} cases · ${sent.toLocaleString()} sampled points · ${environment}\n${pivots.join("\n")}\nStatic bodies and AMR are drawn once. Preview wrote no files.`);
     } catch (error) {
       setStatus(error.message || String(error));
     }
@@ -121,8 +134,16 @@
   function recomputeBounds() {
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     const include = body => body.points.forEach(point => { for (let i = 0; i < 3; i += 1) { min[i] = Math.min(min[i], point[i]); max[i] = Math.max(max[i], point[i]); } });
+    const includePoint = point => { for (let i = 0; i < 3; i += 1) { min[i] = Math.min(min[i], point[i]); max[i] = Math.max(max[i], point[i]); } };
+    const includeBox = box => { includePoint([box.x0, box.y0, box.z0]); includePoint([box.x1, box.y1, box.z1]); };
     state.staticBodies.forEach(include);
     state.cases.forEach(item => item.bodies.forEach(include));
+    if ((el.showMeshBounds.checked || el.showFullMesh.checked) && meshDomainBox()) includeBox(meshDomainBox());
+    if (el.showDenseRegion.checked && state.mesh && state.mesh.dense_box) includeBox(state.mesh.dense_box);
+    if (el.showAmrRegions.checked) {
+      state.staticAmrBlocks.forEach(block => includeBox(amrBlockBox(block)));
+      state.cases.forEach(item => (item.amr_blocks || []).forEach(block => includeBox(amrBlockBox(block))));
+    }
     if (!Number.isFinite(min[0])) { state.bounds = null; return; }
     for (let i = 0; i < 3; i += 1) if (Math.abs(max[i] - min[i]) < 1e-12) { min[i] -= 0.5; max[i] += 0.5; }
     state.bounds = { min, max, span: Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) };
@@ -143,6 +164,10 @@
     ctx.fillRect(0, 0, rect.width, rect.height);
     if (!state.bounds) return;
     drawBounds(rect);
+    if (el.showFullMesh.checked) drawSampledGrid(rect);
+    if (el.showMeshBounds.checked) drawMeshBounds(rect);
+    if (el.showDenseRegion.checked) drawDenseRegion(rect);
+    if (el.showAmrRegions.checked) drawAmrRegions(rect);
     state.staticBodies.forEach(body => drawPoints(rect, body.points, "#555d65", 0.52, 1.25));
     state.cases.forEach(item => { if (item.visible) item.bodies.forEach(body => drawPoints(rect, body.points, "#0e5f95", item.opacity, 1.35)); });
   }
@@ -168,6 +193,68 @@
     const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
     ctx.strokeStyle = "rgba(100,110,120,.22)"; ctx.lineWidth = 0.8; ctx.beginPath();
     edges.forEach(([a,b]) => { const p=project(rect,corners[a]), q=project(rect,corners[b]); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); });
+    ctx.stroke();
+  }
+
+  function meshDomainBox() {
+    if (!state.mesh || !state.mesh.x || !state.mesh.y || !state.mesh.x.length || !state.mesh.y.length) return null;
+    const z = state.mesh.z && state.mesh.z.length ? state.mesh.z : [0, 0];
+    return { x0: state.mesh.x[0], x1: state.mesh.x[state.mesh.x.length - 1], y0: state.mesh.y[0], y1: state.mesh.y[state.mesh.y.length - 1], z0: z[0], z1: z[z.length - 1] };
+  }
+
+  function boxCorners(box) {
+    return [[box.x0,box.y0,box.z0],[box.x1,box.y0,box.z0],[box.x1,box.y1,box.z0],[box.x0,box.y1,box.z0],[box.x0,box.y0,box.z1],[box.x1,box.y0,box.z1],[box.x1,box.y1,box.z1],[box.x0,box.y1,box.z1]];
+  }
+
+  function drawBox(rect, box, stroke, fill, width = 1) {
+    const corners = boxCorners(box).map(point => project(rect, point));
+    const faces = [[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
+    const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+    if (fill) {
+      ctx.fillStyle = fill;
+      faces.forEach(face => { ctx.beginPath(); ctx.moveTo(corners[face[0]].x, corners[face[0]].y); face.slice(1).forEach(i => ctx.lineTo(corners[i].x, corners[i].y)); ctx.closePath(); ctx.fill(); });
+    }
+    ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.beginPath();
+    edges.forEach(([a,b]) => { ctx.moveTo(corners[a].x,corners[a].y); ctx.lineTo(corners[b].x,corners[b].y); });
+    ctx.stroke();
+  }
+
+  function drawMeshBounds(rect) { const box = meshDomainBox(); if (box) drawBox(rect, box, "rgba(51,56,61,.7)", "rgba(95,100,105,.06)", 1.2); }
+  function drawDenseRegion(rect) { if (state.mesh && state.mesh.dense_box) drawBox(rect, state.mesh.dense_box, "rgba(26,120,111,.8)", "rgba(42,132,122,.10)", 1.2); }
+
+  function amrBlockBox(block) {
+    return { x0: Math.min(block.start[0], block.end[0]), x1: Math.max(block.start[0], block.end[0]), y0: Math.min(block.start[1], block.end[1]), y1: Math.max(block.start[1], block.end[1]), z0: Math.min(block.start[2], block.end[2]), z1: Math.max(block.start[2], block.end[2]) };
+  }
+
+  function rgba(hex, alpha) {
+    const value = hex.replace("#", "");
+    return `rgba(${parseInt(value.slice(0,2),16)},${parseInt(value.slice(2,4),16)},${parseInt(value.slice(4,6),16)},${alpha})`;
+  }
+
+  function drawAmrRegions(rect) {
+    state.staticAmrBlocks.forEach(block => { const color = AMR_COLORS[(Number(block.layer) - 1) % AMR_COLORS.length]; drawBox(rect, amrBlockBox(block), rgba(color,.7), rgba(color,.07), 1.2); });
+    state.cases.forEach(item => {
+      if (!item.visible) return;
+      (item.amr_blocks || []).forEach(block => { const color = AMR_COLORS[(Number(block.layer) - 1) % AMR_COLORS.length]; drawBox(rect, amrBlockBox(block), rgba(color,item.opacity), rgba(color,item.opacity * .10), 1.3); });
+    });
+  }
+
+  function sample(values, limit) {
+    if (values.length <= limit) return values;
+    const result = [];
+    for (let i = 0; i < limit; i += 1) result.push(values[Math.round(i * (values.length - 1) / (limit - 1))]);
+    return result;
+  }
+
+  function drawLine(rect, a, b) { const p = project(rect, a), q = project(rect, b); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); }
+  function drawSampledGrid(rect) {
+    if (!state.mesh || !state.mesh.x || !state.mesh.y) return;
+    const x = state.mesh.x, y = state.mesh.y, z = state.mesh.z && state.mesh.z.length ? state.mesh.z : [0];
+    const xs = sample(x, MAX_GRID_LINES), ys = sample(y, MAX_GRID_LINES), zs = sample(z, Math.min(28, MAX_GRID_LINES));
+    ctx.strokeStyle = "rgba(47,127,193,.20)"; ctx.lineWidth = .5; ctx.beginPath();
+    ys.forEach(yy => zs.forEach(zz => drawLine(rect, [x[0],yy,zz], [x[x.length-1],yy,zz])));
+    xs.forEach(xx => zs.forEach(zz => drawLine(rect, [xx,y[0],zz], [xx,y[y.length-1],zz])));
+    if (state.mesh.z && state.mesh.z.length) xs.forEach(xx => ys.forEach(yy => drawLine(rect, [xx,yy,z[0]], [xx,yy,z[z.length-1]])));
     ctx.stroke();
   }
 
@@ -206,5 +293,6 @@
   el.loadBodies.addEventListener("click", loadBodies); el.addGroup.addEventListener("click", () => addGroup());
   el.preview.addEventListener("click", preview); el.create.addEventListener("click", createCases); el.fit.addEventListener("click", fit); el.reset.addEventListener("click", resetView);
   ["top", "iso", "xy", "xz", "yz"].forEach(id => el[id].addEventListener("click", () => setView(id)));
+  [el.showMeshBounds, el.showDenseRegion, el.showFullMesh, el.showAmrRegions].forEach(node => node.addEventListener("change", () => { recomputeBounds(); fit(); }));
   loadBodies();
 })();

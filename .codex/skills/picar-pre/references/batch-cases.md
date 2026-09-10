@@ -33,11 +33,21 @@ positive/negative use `P`/`M` and a decimal point becomes `p`. Examples are
 `pair_B1_XP0p1_B2-4_YP0p4`. An all-zero case is `prefix_BASE`. Duplicate
 transform-derived names block the batch before copying.
 
-Preview is read-only and point-only. Unchanged bodies are sent/drawn once;
+Preview is read-only, and surface geometry is point-only. Unchanged bodies are sent/drawn once;
 changed bodies are repeated per variant. Case opacity runs from deep to light.
 Interactive drawing uses a lower temporary point budget. Preserve ISO/Top/XY/
 XZ/YZ and main-console rotate/pan/zoom conventions through the shared viewport
-core.
+core. The batch scene also reuses the main console's source-grid concepts:
+mesh-domain bounds, dense-region bounds, sampled Cartesian grid lines, and AMR
+axis-aligned boxes. These are independently toggleable and must not cause preview
+writes.
+
+Each group may select AMR block IDs using blank/`none`, `moving`, `all`, or the
+same list/range syntax as body IDs. A selected block follows that group's X/Y/Z
+translation. Reject duplicate block assignment across groups. Do not rotate AMR:
+the file represents blocks by two axis-aligned corners, so a general rotation is
+not representable without changing refinement coverage. Reject a group that has
+both selected AMR blocks and nonzero RX/RY/RZ.
 
 ## Motion-aware rotation
 
@@ -56,7 +66,8 @@ v_new = R v_source
 ```
 
 Use the same XYZ Euler-degree rotation convention as `transform_points` and
-`rotate_fort_motion`. Translation does not change velocity vectors. The default
+`rotate_fort_motion`. Translation-only variants copy `fort.*` byte-for-byte and
+must not rewrite it; only nonzero RX/RY/RZ triggers fort transformation. The default
 mapping is body `b` to `fort.(41+b-1)`, but the UI/API expose `fort_start` and
 physical component order.
 
@@ -84,11 +95,14 @@ directories, validates before copying, and removes directories created by the
 failed operation. Preserve body order, node ids, topology, canonical counts, and
 the body-to-fort mapping.
 
-Grid, AMR, solver-input, and direct fluid-probe coordinates are copied unchanged.
-Do not claim that a large geometry transform automatically reconciles those
-spatial files. Large forts make case copying and rotation expensive; preview must
-not copy or rewrite them.
+Grid, solver-input, and direct fluid-probe coordinates are copied unchanged. AMR
+is copied unchanged by default; only explicitly selected blocks have their six
+corner coordinates translated. Preserve any AMR fields after `AMR_moving` and
+line comments when patching copied files. Do not claim that a large geometry
+transform automatically reconciles other spatial files. Large forts make case
+copying and rotation expensive; preview must not copy or rewrite them.
 
 Regression coverage is `case_editor/test__batch_case_setup.py`. It includes body
 ranges, series broadcasting, naming, non-overwrite behavior, multi-body preview,
-motion-center rotation, fort-vector rotation, and missing-fort rejection.
+mesh/AMR preview payloads, AMR following, motion-center rotation, fort-vector
+rotation, and missing-fort rejection.

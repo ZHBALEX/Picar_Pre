@@ -27,8 +27,8 @@ def write_test_fort(path: Path, node_count: int, vector: tuple[float, float, flo
 
 
 class BatchCaseSetupTests(unittest.TestCase):
-    def test_batch_api_version_identifies_point_cloud_schema(self):
-        self.assertEqual(BATCH_API_VERSION, "motion-center-v6")
+    def test_batch_api_version_identifies_mesh_amr_schema(self):
+        self.assertEqual(BATCH_API_VERSION, "mesh-amr-v7")
 
     def test_body_range_moves_as_one_rigid_group(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -137,6 +137,55 @@ class BatchCaseSetupTests(unittest.TestCase):
             result = grouped_preview_payload(source, groups, "fish", source.parent / "out")
             self.assertEqual([body["body_id"] for body in result["static_bodies"]], [1])
             self.assertEqual([body["body_id"] for body in result["cases"][0]["bodies"]], [2, 3, 4])
+
+    def test_selected_amr_blocks_follow_group_translation_and_preserve_extra_fields(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir); source = root / "source"; source.mkdir()
+            body = SurfaceBody(np.array([[1,0.,0.,0.],[2,1.,0.,0.],[3,0.,1.,0.]]), np.array([[1,1,2,3]]))
+            write_surface(source / "unstruc_surface_in.dat", [body])
+            (source / "amr_in.dat").write_text(
+                "0 AMR_RESIZE\n=== AMR Layer 1 ===\n2\n"
+                "1 0 0 1 2 3 4 5 1 77 88 # keep extra\n"
+                "2 0 10 11 12 13 14 15 0\n",
+                encoding="utf-8",
+            )
+            groups = parse_body_groups(
+                [{"body_ids":"1", "x":"0.5", "y":"-1", "z":"2", "amr_blocks":"moving"}],
+                1, available_amr_ids={1, 2}, moving_amr_ids={1},
+            )
+            variants = create_grouped_cases(source, root / "batch", groups, "fish")
+            text = (variants[0].case_dir / "amr_in.dat").read_text(encoding="utf-8")
+            self.assertIn("1 0 0.5 0 4 3.5 3 7 1 77 88 # keep extra", text)
+            self.assertIn("2 0 10 11 12 13 14 15 0", text)
+
+    def test_amr_follow_rejects_rotation_and_duplicate_assignment(self):
+        with self.assertRaisesRegex(ValueError, "translation only"):
+            parse_body_groups(
+                [{"body_ids":"1", "rz":"10", "amr_blocks":"1"}],
+                2, available_amr_ids={1}, moving_amr_ids=set(),
+            )
+        with self.assertRaisesRegex(ValueError, "more than one group"):
+            parse_body_groups(
+                [{"body_ids":"1", "amr_blocks":"1"}, {"body_ids":"2", "amr_blocks":"1"}],
+                2, available_amr_ids={1}, moving_amr_ids=set(),
+            )
+
+    def test_preview_separates_static_and_following_amr_blocks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir)
+            body = SurfaceBody(np.array([[1,0.,0.,0.],[2,1.,0.,0.],[3,0.,1.,0.]]), np.array([[1,1,2,3]]))
+            write_surface(source / "unstruc_surface_in.dat", [body])
+            amr = {"layers": [{"layer": 1, "blocks": [
+                {"id": 1, "parent": 0, "start": [0.,0.,0.], "end": [1.,1.,1.], "moving": 1},
+                {"id": 2, "parent": 0, "start": [4.,4.,4.], "end": [5.,5.,5.], "moving": 0},
+            ]}]}
+            groups = parse_body_groups(
+                [{"body_ids":"1", "y":"0.25,0.5", "amr_blocks":"moving"}],
+                1, available_amr_ids={1, 2}, moving_amr_ids={1},
+            )
+            result = grouped_preview_payload(source, groups, "fish", source.parent / "out", amr=amr)
+            self.assertEqual([block["id"] for block in result["static_amr_blocks"]], [2])
+            np.testing.assert_allclose(result["cases"][1]["amr_blocks"][0]["start"], [0.,0.5,0.])
 
 
 if __name__ == "__main__":

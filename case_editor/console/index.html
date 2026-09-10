@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picar Console</title>
-  <link rel="stylesheet" href="style.css?v=probe2">
+  <link rel="stylesheet" href="style.css?v=geometry-metrics3">
 </head>
 <body>
   <main class="shell">
@@ -70,6 +70,22 @@
         </div>
         <h2>Bodies</h2>
         <div id="bodyList" class="item-list"></div>
+        <details class="compact-details">
+          <summary>Geometry Metrics</summary>
+          <div class="compact-details-body">
+            <div class="grid two">
+              <label>Front point<select id="geometryFrontSide">
+                <option value="min">X min</option>
+                <option value="max">X max</option>
+              </select></label>
+            </div>
+            <div class="actions">
+              <button id="calculateGeometryMetrics" type="button">Calculate Metrics</button>
+            </div>
+            <p class="hint">Uses selected bodies, or all bodies when none are selected. Matching fort files add full-cycle centers and swept bounds using the Fort tab's Order and Motion mode.</p>
+            <div id="geometryMetricsReport" class="panel-report compact-report">Open and calculate to inspect the active case.</div>
+          </div>
+        </details>
         <div class="grid three">
           <label>Move X<input id="moveX" type="number" step="0.01" value="0"></label>
           <label>Move Y<input id="moveY" type="number" step="0.01" value="0"></label>
@@ -284,6 +300,6 @@
     </section>
   </main>
   <script src="viewport_core.js?v=1"></script>
-  <script src="app.js?v=fort-resample1"></script>
+  <script src="app.js?v=geometry-metrics3"></script>
 </body>
 </html>

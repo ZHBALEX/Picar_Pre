@@ -40,7 +40,7 @@ from motion.visualize import motion_envelope_frame_indices, motion_points_for_fr
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "console"
-CONSOLE_API_VERSION = "fort-resample1"
+CONSOLE_API_VERSION = "geometry-metrics1"
 DENSE_UNIFORM_RATIO = 1.05
 DENSE_SPACING_TOLERANCE = 0.02
 DEFAULT_MESH_INPUT_NAME = "mesh_input_twolayers.dat"
@@ -99,6 +99,7 @@ def make_handler(default_case_dir: Path):
                         "surface_append": True,
                         "geometry_transform": True,
                         "geometry_yz_swap": True,
+                        "geometry_metrics": True,
                         "fort_preview": True,
                         "fort_import": True,
                         "fort_resample": True,
@@ -264,6 +265,8 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
             scale=float(scale),
         )
         return {"ok": True, "path": str(out), "bodies": _json_ready(summarize_surface(bodies)), "report": _case_report(case_dir)}
+    if path == "/api/geometry/metrics":
+        return _geometry_metrics_payload(case_dir, payload)
     if path == "/api/geometry/swap-yz-fort":
         return _swap_yz_surface_fort_payload(case_dir, payload)
     if path == "/api/geometry/remove-bodies":
@@ -478,6 +481,27 @@ def _case_report(case_dir: Path) -> dict[str, object]:
 
     payload["fort"] = _fort_report(case_dir)
     return payload
+
+
+def _geometry_metrics_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    surface_path = case_dir / "unstruc_surface_in.dat"
+    if not surface_path.exists():
+        raise FileNotFoundError(f"Missing file: {surface_path}")
+    project = MotionProject(
+        case_dir,
+        fort_start=int(payload.get("fort_start") or 41),
+    )
+    metrics = project.geometry_metrics(
+        body_ids=_payload_body_ids(payload),
+        front_axis=str(payload.get("front_axis") or "x"),
+        front_side=str(payload.get("front_side") or "min"),
+        component_order=str(payload.get("component_order") or "xyz"),
+        motion_mode=str(payload.get("motion_mode") or "velocity"),
+    )
+    bodies = read_surface(surface_path)
+    selected_ids = set(metrics["body_ids"])
+    summaries = [item for item in summarize_surface(bodies) if int(item["body"]) in selected_ids]
+    return {"ok": True, "bodies": _json_ready(summaries), "metrics": _json_ready(metrics)}
 
 
 def _probe_payload(case_dir: Path) -> dict[str, object]:

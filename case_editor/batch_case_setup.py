@@ -12,7 +12,9 @@ from motion.fort import rotate_fort_motion
 from motion.project import MotionProject
 
 SURFACE_NAME = "unstruc_surface_in.dat"
+AMR_NAME = "amr_in.dat"
 _MOTION_CENTER_CACHE: dict[tuple[object, ...], tuple[np.ndarray, list[dict[str, object]]]] = {}
+_NUMBER_PATTERN = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?")
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class BodyGroup:
     rx: tuple[float, ...]
     ry: tuple[float, ...]
     rz: tuple[float, ...]
+    amr_block_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,7 @@ class PositionVariant:
     case_dir: Path
     translations: dict[int, tuple[float, float, float]]
     rotations: dict[int, tuple[float, float, float]]
+    amr_translations: dict[int, tuple[float, float, float]]
 
 
 def parse_offsets(text: str) -> list[float]:
@@ -86,11 +90,39 @@ def parse_body_ids(value: object, body_count: int) -> tuple[int, ...]:
     return tuple(ids)
 
 
-def parse_body_groups(raw_groups: object, body_count: int) -> list[BodyGroup]:
+def parse_amr_block_ids(
+    value: object,
+    available_ids: set[int],
+    moving_ids: set[int],
+) -> tuple[int, ...]:
+    text = str(value or "").strip().lower()
+    if not text or text == "none":
+        return ()
+    if not available_ids:
+        raise ValueError("AMR follow requested but amr_in.dat has no readable blocks")
+    if text == "all":
+        return tuple(sorted(available_ids))
+    if text == "moving":
+        return tuple(sorted(moving_ids))
+    ids = parse_body_ids(text, max(available_ids) if available_ids else 0)
+    invalid = sorted(set(ids).difference(available_ids))
+    if invalid:
+        raise ValueError(f"AMR block ids {invalid} are not present in amr_in.dat")
+    return ids
+
+
+def parse_body_groups(
+    raw_groups: object,
+    body_count: int,
+    *,
+    available_amr_ids: set[int] | None = None,
+    moving_amr_ids: set[int] | None = None,
+) -> list[BodyGroup]:
     if not isinstance(raw_groups, list) or not raw_groups:
         raise ValueError("Add at least one body group")
     groups: list[BodyGroup] = []
     used: set[int] = set()
+    used_amr: set[int] = set()
     for raw in raw_groups:
         if not isinstance(raw, dict):
             raise ValueError("Invalid body group")
@@ -99,11 +131,24 @@ def parse_body_groups(raw_groups: object, body_count: int) -> list[BodyGroup]:
         if overlap:
             raise ValueError(f"Bodies {sorted(overlap)} appear in more than one group")
         used.update(body_ids)
-        groups.append(BodyGroup(
+        amr_block_ids = parse_amr_block_ids(
+            raw.get("amr_blocks", ""), available_amr_ids or set(), moving_amr_ids or set()
+        )
+        amr_overlap = used_amr.intersection(amr_block_ids)
+        if amr_overlap:
+            raise ValueError(f"AMR blocks {sorted(amr_overlap)} appear in more than one group")
+        used_amr.update(amr_block_ids)
+        group = BodyGroup(
             body_ids,
             parse_series(raw.get("x")), parse_series(raw.get("y")), parse_series(raw.get("z")),
             parse_series(raw.get("rx")), parse_series(raw.get("ry")), parse_series(raw.get("rz")),
-        ))
+            amr_block_ids,
+        )
+        if amr_block_ids and _group_has_rotation(group):
+            raise ValueError(
+                f"AMR blocks are axis-aligned and can follow translation only; remove rotation from group {format_body_ids(body_ids)} or clear AMR blocks"
+            )
+        groups.append(group)
     case_count = max(len(series) for group in groups for series in (group.x, group.y, group.z, group.rx, group.ry, group.rz))
     for group in groups:
         for axis, series in zip(("X", "Y", "Z", "RX", "RY", "RZ"), (group.x, group.y, group.z, group.rx, group.ry, group.rz)):
@@ -159,14 +204,17 @@ def plan_grouped_variants(output_root: str | Path, groups: list[BodyGroup], pref
     for index in range(count):
         translations: dict[int, tuple[float, float, float]] = {}
         rotations: dict[int, tuple[float, float, float]] = {}
+        amr_translations: dict[int, tuple[float, float, float]] = {}
         for group in groups:
             vector = tuple(series[0] if len(series) == 1 else series[index] for series in (group.x, group.y, group.z))
             rotation = tuple(series[0] if len(series) == 1 else series[index] for series in (group.rx, group.ry, group.rz))
             for body_id in group.body_ids:
                 translations[body_id] = vector
                 rotations[body_id] = rotation
+            for block_id in group.amr_block_ids:
+                amr_translations[block_id] = vector
         name = f"{prefix}_{grouped_case_suffix(groups, index)}"
-        variants.append(PositionVariant(name, root / name, translations, rotations))
+        variants.append(PositionVariant(name, root / name, translations, rotations, amr_translations))
     names = [variant.name for variant in variants]
     if len(set(names)) != len(names):
         raise ValueError("Two cases have the same position-derived name; remove duplicate position combinations")
@@ -258,6 +306,77 @@ def apply_variant_transform(bodies: list[SurfaceBody], variant: PositionVariant,
     ]
 
 
+def translate_amr_text(text: str, translations: dict[int, tuple[float, float, float]]) -> str:
+    """Translate selected AMR boxes while retaining the source file's other fields and comments."""
+    if not translations:
+        return text
+    output: list[str] = []
+    in_layer = False
+    expecting_count = False
+    for raw_line in text.splitlines(keepends=True):
+        stripped = raw_line.strip()
+        if "AMR Layer" in stripped:
+            in_layer = True
+            expecting_count = True
+            output.append(raw_line)
+            continue
+        matches = list(_NUMBER_PATTERN.finditer(raw_line))
+        if in_layer and expecting_count and len(matches) == 1:
+            expecting_count = False
+            output.append(raw_line)
+            continue
+        if not in_layer or len(matches) < 9:
+            output.append(raw_line)
+            continue
+        block_id = int(float(matches[0].group().replace("D", "E").replace("d", "e")))
+        delta = translations.get(block_id)
+        if delta is None:
+            output.append(raw_line)
+            continue
+        replacements: dict[int, str] = {}
+        for token_index in range(2, 8):
+            old = float(matches[token_index].group().replace("D", "E").replace("d", "e"))
+            replacements[token_index] = f"{old + delta[(token_index - 2) % 3]:.10g}"
+        pieces: list[str] = []
+        cursor = 0
+        for token_index, match in enumerate(matches):
+            pieces.append(raw_line[cursor:match.start()])
+            pieces.append(replacements.get(token_index, match.group()))
+            cursor = match.end()
+        pieces.append(raw_line[cursor:])
+        output.append("".join(pieces))
+    return "".join(output)
+
+
+def flatten_amr_blocks(amr: dict[str, object] | None) -> list[dict[str, object]]:
+    blocks: list[dict[str, object]] = []
+    for layer_index, layer in enumerate((amr or {}).get("layers") or []):
+        if not isinstance(layer, dict):
+            continue
+        layer_number = int(layer.get("layer") or layer_index + 1)
+        for block in layer.get("blocks") or []:
+            if isinstance(block, dict):
+                blocks.append({"layer": layer_number, **block})
+    return blocks
+
+
+def translated_amr_blocks(
+    blocks: list[dict[str, object]], translations: dict[int, tuple[float, float, float]]
+) -> list[dict[str, object]]:
+    moved: list[dict[str, object]] = []
+    for block in blocks:
+        block_id = int(block["id"])
+        if block_id not in translations:
+            continue
+        delta = translations[block_id]
+        moved.append({
+            **block,
+            "start": [float(value) + delta[index] for index, value in enumerate(block["start"])],
+            "end": [float(value) + delta[index] for index, value in enumerate(block["end"])],
+        })
+    return moved
+
+
 def create_grouped_cases(
     source_case: str | Path,
     output_root: str | Path,
@@ -284,6 +403,10 @@ def create_grouped_cases(
         source, bodies, groups, fort_start=fort_start, component_order=component_order
     )
     outputs = [(variant, apply_variant_transform(bodies, variant, pivots)) for variant in variants]
+    amr_path = source / AMR_NAME
+    if any(variant.amr_translations for variant in variants) and not amr_path.is_file():
+        raise FileNotFoundError(f"AMR follow requested but file not found: {amr_path}")
+    amr_text = amr_path.read_text(encoding="utf-8", errors="replace") if amr_path.is_file() else ""
     root.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
     try:
@@ -291,6 +414,10 @@ def create_grouped_cases(
             shutil.copytree(source, variant.case_dir)
             created.append(variant.case_dir)
             write_surface(variant.case_dir / SURFACE_NAME, moved_bodies)
+            if variant.amr_translations:
+                (variant.case_dir / AMR_NAME).write_text(
+                    translate_amr_text(amr_text, variant.amr_translations), encoding="utf-8"
+                )
             for body_id, rotation in variant.rotations.items():
                 if not any(abs(value) > 1e-14 for value in rotation):
                     continue
@@ -386,6 +513,7 @@ def grouped_preview_payload(
     *,
     fort_start: int = 41,
     component_order: str = "xyz",
+    amr: dict[str, object] | None = None,
 ) -> dict[str, object]:
     source = Path(source_case).expanduser().resolve()
     bodies = read_surface(source / SURFACE_NAME)
@@ -398,6 +526,9 @@ def grouped_preview_payload(
         if any(abs(value) > 1e-14 for value in variant.translations[body_id] + variant.rotations[body_id])
     }
     static = [{"body_id": index, **body_points_payload(body)} for index, body in enumerate(bodies, 1) if index not in changed_ids]
+    all_amr_blocks = flatten_amr_blocks(amr)
+    changed_amr_ids = {block_id for variant in variants for block_id in variant.amr_translations}
+    static_amr = [block for block in all_amr_blocks if int(block["id"]) not in changed_amr_ids]
     cases = []
     for variant in variants:
         case_bodies = []
@@ -406,5 +537,15 @@ def grouped_preview_payload(
                 bodies[body_id - 1], variant.rotations[body_id], variant.translations[body_id], pivots[body_id]
             )
             case_bodies.append({"body_id": body_id, **body_points_payload(moved)})
-        cases.append({"name": variant.name, "path": str(variant.case_dir), "bodies": case_bodies})
-    return {"static_bodies": static, "cases": cases, "rotation_pivots": pivot_reports}
+        cases.append({
+            "name": variant.name,
+            "path": str(variant.case_dir),
+            "bodies": case_bodies,
+            "amr_blocks": translated_amr_blocks(all_amr_blocks, variant.amr_translations),
+        })
+    return {
+        "static_bodies": static,
+        "static_amr_blocks": static_amr,
+        "cases": cases,
+        "rotation_pivots": pivot_reports,
+    }

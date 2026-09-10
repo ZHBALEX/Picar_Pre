@@ -36,6 +36,15 @@ def _fort_series_bytes(vectors: list[tuple[float, float, float]], dt: float) -> 
     return stream.getvalue()
 
 
+def _fort_node_frames_bytes(frames: list[list[tuple[float, float, float]]], dt: float = 1.0) -> bytes:
+    stream = io.BytesIO()
+    for frame_index, vectors in enumerate(frames, start=1):
+        stream.write(struct.pack("<iddii", 20, dt, frame_index * dt, len(vectors), 20))
+        for vector in vectors:
+            stream.write(struct.pack("<i3di", 24, *vector, 24))
+    return stream.getvalue()
+
+
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
@@ -210,6 +219,100 @@ def test_fort_preview_includes_motion_envelope_frame(tmp_path: Path) -> None:
 
     frames = [item["frame"] for item in result["frames"]]
     assert frames == [0, 1, 2]
+
+
+def test_geometry_metrics_reports_reference_front_and_full_motion_box(tmp_path: Path) -> None:
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    body = SurfaceBody(
+        nodes=np.asarray(
+            [
+                [1, 0.0, 0.0, 0.0],
+                [2, 2.0, 0.0, 0.0],
+                [3, 0.0, 2.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        elems=np.asarray([[1, 1, 2, 3]], dtype=int),
+    )
+    write_surface(case_dir / "unstruc_surface_in.dat", [body])
+    (case_dir / "fort.41").write_bytes(
+        _fort_node_frames_bytes(
+            [
+                [(0.0, 2.0, 0.0), (1.0, 0.0, 0.0), (0.0, 2.0, 0.0)],
+                [(0.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 0.0, 0.0)],
+            ]
+        )
+    )
+
+    result = _handle_post_api(
+        "/api/geometry/metrics",
+        {
+            "case_dir": str(case_dir),
+            "body_ids": [1],
+            "front_axis": "x",
+            "front_side": "min",
+            "motion_mode": "displacement",
+            "component_order": "xyz",
+        },
+        case_dir,
+    )
+
+    reference = result["metrics"]["reference"]
+    motion = result["metrics"]["motion"]
+    np.testing.assert_allclose(reference["min"], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(reference["max"], [2.0, 2.0, 0.0])
+    np.testing.assert_allclose(reference["point_center"], [2.0 / 3.0, 2.0 / 3.0, 0.0])
+    np.testing.assert_allclose(reference["box_center"], [1.0, 1.0, 0.0])
+    np.testing.assert_allclose(reference["front_point_center"], [0.0, 1.0, 0.0])
+    np.testing.assert_allclose(reference["surface_area"], 2.0)
+    np.testing.assert_allclose(result["bodies"][0]["surface_area"], 2.0)
+    assert reference["front_node_count"] == 2
+    np.testing.assert_allclose(motion["min"], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(motion["max"], [3.0, 4.0, 0.0])
+    np.testing.assert_allclose(motion["box_center"], [1.5, 2.0, 0.0])
+    np.testing.assert_allclose(motion["point_center"], [2.0 / 3.0, 4.0 / 3.0, 0.0])
+    np.testing.assert_allclose(motion["front_point_center"], [0.0, 2.0, 0.0])
+
+
+def test_geometry_metrics_keeps_reference_results_when_fort_is_missing(tmp_path: Path) -> None:
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    write_surface(case_dir / "unstruc_surface_in.dat", [make_rectangle_2d(width=4.0, height=2.0)])
+
+    result = _handle_post_api(
+        "/api/geometry/metrics",
+        {"case_dir": str(case_dir), "body_ids": [1]},
+        case_dir,
+    )
+
+    assert result["metrics"]["motion"] is None
+    assert result["metrics"]["issues"] == ["Body 1: missing fort.41"]
+    np.testing.assert_allclose(result["metrics"]["reference"]["box_center"], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(result["metrics"]["reference"]["surface_area"], 0.0)
+
+
+def test_geometry_metrics_reports_surface_area_for_each_selected_body(tmp_path: Path) -> None:
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    body_1 = SurfaceBody(
+        nodes=np.asarray([[1, 0.0, 0.0, 0.0], [2, 1.0, 0.0, 0.0], [3, 0.0, 1.0, 0.0]]),
+        elems=np.asarray([[1, 1, 2, 3]], dtype=int),
+    )
+    body_2 = SurfaceBody(
+        nodes=np.asarray([[1, 5.0, 0.0, 0.0], [2, 7.0, 0.0, 0.0], [3, 5.0, 2.0, 0.0]]),
+        elems=np.asarray([[1, 1, 2, 3]], dtype=int),
+    )
+    write_surface(case_dir / "unstruc_surface_in.dat", [body_1, body_2])
+
+    result = _handle_post_api(
+        "/api/geometry/metrics",
+        {"case_dir": str(case_dir), "body_ids": [1, 2]},
+        case_dir,
+    )
+
+    np.testing.assert_allclose(result["metrics"]["reference"]["surface_area"], 2.5)
+    np.testing.assert_allclose([body["surface_area"] for body in result["bodies"]], [0.5, 2.0])
 
 
 def test_swap_yz_surface_and_matching_fort_for_selected_body(tmp_path: Path) -> None:

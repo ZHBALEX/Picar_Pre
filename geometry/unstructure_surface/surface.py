@@ -34,6 +34,25 @@ class SurfaceBody:
         return int(self.elems.shape[0])
 
 
+def surface_area(body: SurfaceBody) -> float:
+    """Return the sum of triangle areas for one surface body."""
+    if body.elem_count == 0:
+        return 0.0
+
+    node_by_id = {int(row[0]): row[1:4] for row in body.nodes}
+    try:
+        triangles = np.asarray(
+            [[node_by_id[int(node_id)] for node_id in elem[1:4]] for elem in body.elems],
+            dtype=float,
+        )
+    except KeyError as exc:
+        raise ValueError(f"Element references missing node id {exc.args[0]}") from exc
+
+    edge_1 = triangles[:, 1] - triangles[:, 0]
+    edge_2 = triangles[:, 2] - triangles[:, 0]
+    return float(0.5 * np.linalg.norm(np.cross(edge_1, edge_2), axis=1).sum())
+
+
 def _read_nonempty_lines(path: str | Path) -> list[str]:
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return [line.strip() for line in f if line.strip()]
@@ -209,14 +228,23 @@ def summarize_surface(bodies: Iterable[SurfaceBody]) -> list[dict[str, object]]:
     summary = []
     for idx, body in enumerate(bodies, start=1):
         points = body.points
+        xyz_min = points.min(axis=0)
+        xyz_max = points.max(axis=0)
+        try:
+            area = surface_area(body)
+        except ValueError:
+            area = None
         summary.append(
             {
                 "body": idx,
                 "nodes": body.node_count,
                 "elems": body.elem_count,
-                "min": points.min(axis=0),
-                "max": points.max(axis=0),
+                "min": xyz_min,
+                "max": xyz_max,
+                "span": xyz_max - xyz_min,
                 "center": points.mean(axis=0),
+                "box_center": 0.5 * (xyz_min + xyz_max),
+                "surface_area": area,
             }
         )
     return summary

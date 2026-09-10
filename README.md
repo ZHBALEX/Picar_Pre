@@ -159,7 +159,16 @@ same series, body ids are included in the suffix to keep names unambiguous.
 and supports ISO, Top, XY, XZ, and YZ views. Drag to rotate, Ctrl-drag to pan,
 and use the mouse wheel to zoom. Only sampled surface points are drawn: unchanged
 bodies appear once, while changed groups are overlaid from deep to light opacity.
-Individual variants can be hidden from the case list.
+Individual variants can be hidden from the case list. The right-side toolbar can
+also show the source mesh boundary, dense-region box, sampled Cartesian grid,
+and AMR boxes in the same scene.
+
+Each rigid group has an optional `AMR blocks` field. Leave it blank to keep AMR
+fixed, enter `moving` to select blocks whose `AMR_moving` flag is nonzero, enter
+`all`, or enter IDs/ranges such as `1,3-4`. Selected boxes receive the same
+X/Y/Z translation as that body group in every variant and appear in the same
+opacity gradient. AMR boxes are axis-aligned, so AMR following is intentionally
+translation-only; combining a selected AMR block with RX/RY/RZ is rejected.
 
 ### Rotation and prescribed motion
 
@@ -179,7 +188,8 @@ are configurable. Every rotated body must have a matching, complete fort file
 with the same node count as its surface body. Preview reports the recovered motion
 center and maximum cycle drift. Motion-center results are cached using the source
 surface/fort metadata, so repeated previews do not rescan unchanged large files.
-Translation does not alter fort velocity vectors.
+For a translation-only group, `fort.*` files are copied byte-for-byte and are not
+rewritten. Only a nonzero RX/RY/RZ rotation triggers fort transformation.
 
 ### Creation and safety
 
@@ -189,9 +199,10 @@ rotated surface/fort mappings before copying, and removes directories created by
 the current operation if generation fails. Body order, node ids, topology, and
 canonical body counts remain unchanged.
 
-Grid, AMR, solver-input, and direct fluid-probe coordinates are copied as-is; the
-batch tool does not reposition them. Inspect their spatial coverage after a large
-translation or rotation. See
+Grid, solver-input, and direct fluid-probe coordinates are copied as-is. AMR is
+also copied as-is unless blocks are explicitly assigned to a translating group;
+only those blocks' start/end coordinates change. Inspect spatial coverage after
+a large translation or rotation. See
 [case_editor/batch_console/README.md](case_editor/batch_console/README.md) for the
 compact feature reference.
 

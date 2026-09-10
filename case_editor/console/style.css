@@ -373,6 +373,162 @@ pre {
   color: #2f3c48;
 }
 
+.compact-details {
+  border: 1px solid #d6dde3;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.compact-details summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  color: #35424e;
+  font-weight: 600;
+}
+
+.compact-details-body {
+  display: grid;
+  gap: 9px;
+  padding: 0 10px 10px;
+}
+
+.compact-report {
+  max-height: 300px;
+  overflow: auto;
+  padding: 0;
+  font: 12px/1.35 Inter, "Segoe UI", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-report-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid #dce3e8;
+  background: #f5f8fa;
+  color: #34414d;
+}
+
+.metric-report-head span {
+  color: #71808c;
+}
+
+.metric-section {
+  padding: 10px;
+}
+
+.metric-section + .metric-section {
+  border-top: 1px solid #dce3e8;
+}
+
+.metric-section h3 {
+  margin: 0 0 7px;
+  color: #25313d;
+  font-size: 12px;
+}
+
+.metric-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.metric-table th,
+.metric-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid #edf1f4;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.metric-table th:first-child {
+  width: 18%;
+  text-align: left;
+}
+
+.metric-table thead th {
+  color: #71808c;
+  font-weight: 500;
+}
+
+.metric-table tbody th {
+  color: #176f83;
+}
+
+.metric-centers {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.metric-scalar-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+  background: #f2f7f8;
+}
+
+.metric-scalar-row span {
+  color: #60707d;
+}
+
+.metric-scalar-row strong {
+  font: 11px/1.35 "Cascadia Mono", Consolas, monospace;
+}
+
+.metric-center-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+}
+
+.metric-center-row > span {
+  color: #60707d;
+}
+
+.metric-center-row strong {
+  font: 11px/1.35 "Cascadia Mono", Consolas, monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.metric-center-row small {
+  grid-column: 2;
+  color: #82909b;
+  text-align: right;
+}
+
+.metric-warnings {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border-top: 1px solid #ead8a7;
+  background: #fff8e8;
+  color: #785d18;
+}
+
+.metric-subdetails {
+  border-top: 1px solid #dce3e8;
+}
+
+.metric-subdetails > summary {
+  padding: 9px 10px;
+  cursor: pointer;
+  color: #60707d;
+}
+
+.metric-subdetails .metric-section {
+  border-top: 1px solid #edf1f4;
+}
+
 .stage {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;

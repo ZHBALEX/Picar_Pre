@@ -64,6 +64,9 @@
     appendGeometry: document.getElementById("appendGeometry"),
     exportStl: document.getElementById("exportStl"),
     bodyList: document.getElementById("bodyList"),
+    geometryFrontSide: document.getElementById("geometryFrontSide"),
+    calculateGeometryMetrics: document.getElementById("calculateGeometryMetrics"),
+    geometryMetricsReport: document.getElementById("geometryMetricsReport"),
     moveX: document.getElementById("moveX"),
     moveY: document.getElementById("moveY"),
     moveZ: document.getElementById("moveZ"),
@@ -152,6 +155,7 @@
     meshPreviewSuspended: false,
     pendingGeometryFile: null,
     pendingFortFile: null,
+    geometryMetrics: null,
     bounds: null,
     angleX: 0.62,
     angleY: -0.78,
@@ -217,6 +221,7 @@
     el.importGeometry.addEventListener("click", () => importGeometry(false));
     el.appendGeometry.addEventListener("click", () => importGeometry(true));
     el.exportStl.addEventListener("click", exportStl);
+    el.calculateGeometryMetrics.addEventListener("click", calculateGeometryMetrics);
     el.applyBodyTransform.addEventListener("click", applyBodyTransform);
     el.swapBodyYzFort.addEventListener("click", swapSelectedBodyYzFort);
     el.removeBodies.addEventListener("click", removeSelectedBodies);
@@ -287,6 +292,7 @@
       state.loadedFiles = [];
       state.pendingGeometryFile = null;
       state.pendingFortFile = null;
+      state.geometryMetrics = null;
       setProbeLayerAvailable(false);
 
       if (report.surface) {
@@ -368,6 +374,7 @@
     }
     renderLoadedFiles();
     renderBodyList();
+    renderGeometryMetrics();
     renderAmrPanel();
     renderFortPanel();
     renderProbePanel();
@@ -432,8 +439,10 @@
     recomputeBounds();
     fit();
     updateStats();
+    state.geometryMetrics = null;
     renderLoadedFiles();
     renderBodyList();
+    renderGeometryMetrics();
     renderAmrPanel();
     renderFortPanel();
     renderProbePanel();
@@ -507,6 +516,8 @@
     updateStats();
     renderLoadedFiles();
     renderBodyList();
+    state.geometryMetrics = null;
+    renderGeometryMetrics();
     renderAmrPanel();
     renderFortPanel();
     renderProbePanel();
@@ -532,6 +543,133 @@
         </div>
       `;
     }).join("");
+  }
+
+  async function calculateGeometryMetrics() {
+    if (!state.surface || !state.surface.bodies.length) {
+      setStatus("Geometry metrics require a loaded surface.");
+      return;
+    }
+    const selected = selectedBodyIds();
+    const bodyIds = selected.length
+      ? selected
+      : Array.from({ length: state.surface.bodies.length }, (_, index) => index + 1);
+    const oldLabel = el.calculateGeometryMetrics.textContent;
+    el.calculateGeometryMetrics.disabled = true;
+    el.calculateGeometryMetrics.textContent = "Calculating...";
+    el.geometryMetricsReport.textContent = "Scanning geometry and matching fort frames...";
+    try {
+      await requireGeometryMetricsApi();
+      const result = await postJson("/api/geometry/metrics", {
+        case_dir: el.caseDir.value.trim(),
+        body_ids: bodyIds,
+        front_axis: "x",
+        front_side: el.geometryFrontSide.value || "min",
+        fort_start: state.fort && state.fort.fort_start ? Number(state.fort.fort_start) : 41,
+        component_order: el.fortOrder.value || "xyz",
+        motion_mode: el.fortMode.value || "velocity",
+      });
+      state.geometryMetrics = result;
+      renderGeometryMetrics();
+      setStatus(`Geometry metrics calculated for body ${bodyIds.join(", ")}.`);
+    } catch (err) {
+      state.geometryMetrics = null;
+      el.geometryMetricsReport.textContent = `Geometry metrics failed: ${cleanErrorMessage(err)}`;
+      setStatus(`Geometry metrics failed: ${cleanErrorMessage(err)}`);
+    } finally {
+      el.calculateGeometryMetrics.disabled = false;
+      el.calculateGeometryMetrics.textContent = oldLabel;
+    }
+  }
+
+  function renderGeometryMetrics() {
+    if (!el.geometryMetricsReport) return;
+    const result = state.geometryMetrics;
+    if (!result || !result.metrics) {
+      el.geometryMetricsReport.textContent = "Open and calculate to inspect the active case.";
+      return;
+    }
+    const metrics = result.metrics;
+    const reference = metrics.reference;
+    const sections = [
+      `<div class="metric-report-head"><strong>Bodies ${metrics.body_ids.map(Number).join(", ")}</strong><span>${Number(metrics.node_count).toLocaleString()} nodes</span></div>`,
+      formatMetricSection("Reference geometry", reference, [
+        ["Point center", reference.point_center],
+        ["Box center", reference.box_center],
+        [`Front · ${String(reference.front_axis).toUpperCase()} ${reference.front_side}`, reference.front_point_center, `${reference.front_node_count} node${reference.front_node_count === 1 ? "" : "s"}`],
+      ]),
+    ];
+    if (metrics.motion) {
+      sections.push(formatMetricSection(
+        `Fort motion · ${metrics.motion.motion_mode} · ${metrics.motion.component_order}`,
+        metrics.motion,
+        [
+          ["Cycle point", metrics.motion.point_center],
+          ["Cycle front", metrics.motion.front_point_center],
+          ["Overall box", metrics.motion.box_center],
+        ],
+      ));
+    }
+    if ((metrics.issues || []).length) {
+      sections.push(`<div class="metric-warnings">${metrics.issues.map((issue) => `<div>${escapeHtml(issue)}</div>`).join("")}</div>`);
+    }
+    if ((result.bodies || []).length > 1) {
+      const bodySections = result.bodies.map((body) => formatMetricSection(`Body ${Number(body.body)}`, body)).join("");
+      sections.push(`<details class="metric-subdetails"><summary>Per-body reference ranges</summary>${bodySections}</details>`);
+    }
+    el.geometryMetricsReport.innerHTML = sections.join("");
+  }
+
+  function formatMetricSection(title, item, centers = []) {
+    const axisRows = ["X", "Y", "Z"].map((axis, index) => `
+      <tr>
+        <th scope="row">${axis}</th>
+        <td>${formatMetricNumber(item.min[index])}</td>
+        <td>${formatMetricNumber(item.max[index])}</td>
+        <td>${formatMetricNumber(item.span[index])}</td>
+      </tr>
+    `).join("");
+    const centerRows = centers.length ? `
+      <div class="metric-centers">
+        ${centers.map(([label, point, note]) => `
+          <div class="metric-center-row">
+            <span>${escapeHtml(label)}</span>
+            <strong>${formatMetricPoint(point)}</strong>
+            ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    ` : "";
+    const hasSurfaceArea = item.surface_area !== null
+      && item.surface_area !== undefined
+      && Number.isFinite(Number(item.surface_area));
+    const areaRow = hasSurfaceArea ? `
+      <div class="metric-scalar-row">
+        <span>Surface area</span>
+        <strong>${formatMetricNumber(item.surface_area)}</strong>
+      </div>
+    ` : "";
+    return `
+      <section class="metric-section">
+        <h3>${escapeHtml(title)}</h3>
+        <table class="metric-table">
+          <thead><tr><th>Axis</th><th>Min</th><th>Max</th><th>Span</th></tr></thead>
+          <tbody>${axisRows}</tbody>
+        </table>
+        ${areaRow}
+        ${centerRows}
+      </section>
+    `;
+  }
+
+  function formatMetricPoint(point) {
+    return `(${point.map(formatMetricNumber).join(", ")})`;
+  }
+
+  function formatMetricNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "n/a";
+    return (Math.abs(number) < 0.0005 ? 0 : number).toFixed(3);
   }
 
   function renderAmrPanel() {
@@ -1451,6 +1589,13 @@
     const health = await fetchJson("/api/health");
     if (!health.geometry_yz_swap) {
       throw new Error("Backend is still running an old API. Stop the console server and restart `python -B picar_console.py` before swapping Y/Z.");
+    }
+  }
+
+  async function requireGeometryMetricsApi() {
+    const health = await fetchJson("/api/health");
+    if (!health.geometry_metrics) {
+      throw new Error("Backend is still running an old API. Restart `python -B picar_console.py` before calculating geometry metrics.");
     }
   }
 

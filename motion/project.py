@@ -5,7 +5,13 @@ from pathlib import Path
 
 import numpy as np
 
-from geometry.unstructure_surface.surface import DEFAULT_CASE_SURFACE, SurfaceBody, read_surface, write_surface
+from geometry.unstructure_surface.surface import (
+    DEFAULT_CASE_SURFACE,
+    SurfaceBody,
+    read_surface,
+    surface_area,
+    write_surface,
+)
 
 from .analysis import (
     analyze_centerline_motion,
@@ -209,6 +215,144 @@ class MotionProject:
         if point_count <= 0:
             raise ValueError("Cannot compute a motion center for an empty body group")
         return point_sum / float(point_count), stats
+
+    def geometry_metrics(
+        self,
+        body_ids: list[int] | None = None,
+        *,
+        front_axis: str = "x",
+        front_side: str = "min",
+        component_order: str = "xyz",
+        motion_mode: str = "velocity",
+    ) -> dict[str, object]:
+        """Return reference and full-fort spatial metrics for selected bodies.
+
+        Front nodes are selected once from the reference geometry at the global
+        extreme of ``front_axis``. Their cycle-average position therefore tracks
+        the same material point(s) throughout the fort motion.
+        """
+        bodies = read_surface(self.surface_path)
+        if not bodies:
+            raise ValueError(f"No surface bodies found in {self.surface_path}")
+
+        if body_ids:
+            target_ids = sorted({int(body_id) for body_id in body_ids})
+        else:
+            target_ids = list(range(1, len(bodies) + 1))
+        for body_id in target_ids:
+            if body_id < 1 or body_id > len(bodies):
+                raise ValueError(f"body_id must be in 1..{len(bodies)}, got {body_id}")
+
+        axis_names = {"x": 0, "y": 1, "z": 2}
+        axis_name = str(front_axis).lower()
+        if axis_name not in axis_names:
+            raise ValueError("front_axis must be 'x', 'y', or 'z'")
+        side = str(front_side).lower()
+        if side not in {"min", "max"}:
+            raise ValueError("front_side must be 'min' or 'max'")
+        if motion_mode not in {"velocity", "relative", "displacement"}:
+            raise ValueError("motion_mode must be 'velocity', 'relative', or 'displacement'")
+
+        selected = [(body_id, bodies[body_id - 1]) for body_id in target_ids]
+        xyz_min = np.minimum.reduce([body.points.min(axis=0) for _, body in selected])
+        xyz_max = np.maximum.reduce([body.points.max(axis=0) for _, body in selected])
+        node_count = sum(body.node_count for _, body in selected)
+        point_center = sum((body.points.sum(axis=0) for _, body in selected), np.zeros(3)) / float(node_count)
+
+        axis = axis_names[axis_name]
+        front_value = xyz_min[axis] if side == "min" else xyz_max[axis]
+        front_tolerance = max(1.0e-12, float(xyz_max[axis] - xyz_min[axis]) * 1.0e-9)
+        front_masks: dict[int, np.ndarray] = {}
+        for body_id, body in selected:
+            front_masks[body_id] = np.isclose(body.points[:, axis], front_value, rtol=0.0, atol=front_tolerance)
+        front_node_count = sum(int(mask.sum()) for mask in front_masks.values())
+        front_point_sum = sum(
+            (body.points[front_masks[body_id]].sum(axis=0) for body_id, body in selected if front_masks[body_id].any()),
+            np.zeros(3),
+        )
+
+        result: dict[str, object] = {
+            "body_ids": target_ids,
+            "node_count": node_count,
+            "reference": {
+                "min": xyz_min,
+                "max": xyz_max,
+                "span": xyz_max - xyz_min,
+                "point_center": point_center,
+                "box_center": 0.5 * (xyz_min + xyz_max),
+                "front_axis": axis_name,
+                "front_side": side,
+                "front_value": float(front_value),
+                "front_node_count": front_node_count,
+                "front_point_center": front_point_sum / float(front_node_count),
+                "surface_area": sum(surface_area(body) for _, body in selected),
+            },
+            "motion": None,
+            "issues": [],
+        }
+
+        infos: dict[int, FortMotionInfo] = {}
+        issues: list[str] = []
+        for body_id, body in selected:
+            fort_path = self.fort_path_for_body(body_id)
+            if not fort_path.exists():
+                issues.append(f"Body {body_id}: missing {fort_path.name}")
+                continue
+            try:
+                info = fort_motion_info(fort_path)
+            except Exception as exc:
+                issues.append(f"Body {body_id}: {fort_path.name} is invalid ({exc})")
+                continue
+            if info.node_count != body.node_count:
+                issues.append(
+                    f"Body {body_id}: {fort_path.name} has {info.node_count} nodes; surface has {body.node_count}"
+                )
+                continue
+            infos[body_id] = info
+
+        if issues:
+            result["issues"] = issues
+            return result
+
+        motion_min = np.full(3, np.inf)
+        motion_max = np.full(3, -np.inf)
+        average_point_sum = np.zeros(3)
+        average_front_sum = np.zeros(3)
+        motion_bodies: list[dict[str, object]] = []
+        for body_id, body in selected:
+            body_metrics = self._body_geometry_metrics(
+                body,
+                self.fort_path_for_body(body_id),
+                infos[body_id],
+                front_masks[body_id],
+                component_order=component_order,
+                motion_mode=motion_mode,
+            )
+            motion_min = np.minimum(motion_min, body_metrics["min"])
+            motion_max = np.maximum(motion_max, body_metrics["max"])
+            average_point_sum += body_metrics["point_center"] * body.node_count
+            average_front_sum += body_metrics["front_point_sum"]
+            motion_bodies.append({
+                "body": body_id,
+                "frames": infos[body_id].frame_count,
+                "min": body_metrics["min"],
+                "max": body_metrics["max"],
+                "box_center": 0.5 * (body_metrics["min"] + body_metrics["max"]),
+                "point_center": body_metrics["point_center"],
+            })
+
+        result["motion"] = {
+            "component_order": component_order,
+            "motion_mode": motion_mode,
+            "min": motion_min,
+            "max": motion_max,
+            "span": motion_max - motion_min,
+            "box_center": 0.5 * (motion_min + motion_max),
+            "point_center": average_point_sum / float(node_count),
+            "front_point_center": average_front_sum / float(front_node_count),
+            "bodies": motion_bodies,
+        }
+        return result
 
     def view(
         self,
@@ -423,6 +567,50 @@ class MotionProject:
             max_surface_offset=float(np.linalg.norm(offset, axis=1).max()),
             mean_surface_offset=float(np.linalg.norm(offset, axis=1).mean()),
         )
+
+    def _body_geometry_metrics(
+        self,
+        body: SurfaceBody,
+        fort_path: Path,
+        info: FortMotionInfo,
+        front_mask: np.ndarray,
+        *,
+        component_order: str,
+        motion_mode: str,
+    ) -> dict[str, np.ndarray]:
+        points = body.points.copy()
+        point_sum = np.zeros(3)
+        front_sum = np.zeros(3)
+        xyz_min = np.full(3, np.inf)
+        xyz_max = np.full(3, -np.inf)
+        center = body.points.mean(axis=0).reshape(1, 3)
+        for frame_index in range(info.frame_count):
+            header, motion = read_frame(
+                fort_path,
+                frame_index,
+                node_count=body.node_count,
+                component_order=component_order,
+            )
+            if motion_mode == "velocity":
+                points = points + motion * header.dt
+                deformed = points
+            elif motion_mode == "relative":
+                deformed = center + motion
+            else:
+                deformed = body.points + motion
+
+            xyz_min = np.minimum(xyz_min, deformed.min(axis=0))
+            xyz_max = np.maximum(xyz_max, deformed.max(axis=0))
+            point_sum += deformed.sum(axis=0)
+            if front_mask.any():
+                front_sum += deformed[front_mask].sum(axis=0)
+
+        return {
+            "min": xyz_min,
+            "max": xyz_max,
+            "point_center": point_sum / float(info.frame_count * body.node_count),
+            "front_point_sum": front_sum / float(info.frame_count),
+        }
 
     def _cycle_average_velocity(
         self,

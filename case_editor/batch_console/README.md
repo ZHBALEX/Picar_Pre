@@ -30,6 +30,17 @@ A field may contain one value, which is broadcast to every case, or one comma-
 or space-separated value per case. All non-singleton fields across all groups
 must have the same length.
 
+A group also has an optional `AMR blocks` selector. Use:
+
+- blank/`none` to leave every AMR box fixed;
+- `moving` for all blocks with a nonzero `AMR_moving` value;
+- `all`; or
+- explicit IDs/ranges such as `1,3-4`.
+
+One AMR block cannot belong to two groups. Selected boxes follow the group's
+X/Y/Z translation in each case. Because `amr_in.dat` stores axis-aligned start
+and end corners, AMR following cannot be combined with rotation.
+
 Example:
 
 ```text
@@ -60,12 +71,17 @@ because they would produce the same directory name.
 
 ## Preview
 
-Preview does not write files. It sends sampled surface points only:
+Preview does not write files. Surface geometry stays point-only:
 
 - unchanged bodies are transmitted and drawn once;
 - transformed bodies are overlaid per case;
 - opacity runs from deep for the first case to light for the last;
 - each case can be hidden independently.
+
+The environment is sent once and may be toggled independently in the right-side
+toolbar: mesh boundary, inferred dense region, sampled Cartesian grid, and AMR
+boxes. A followed AMR box is overlaid per case using the same deep-to-light
+opacity order; unchanged boxes are drawn once.
 
 The viewport uses the shared Picar camera projection. It supports ISO, Top, XY,
 XZ, and YZ views; drag rotates, Ctrl-drag pans, and the wheel zooms. During an
@@ -91,8 +107,9 @@ p' = c_motion + R (p - c_motion) + translation
 v' = R v
 ```
 
-Translation does not alter velocity vectors. `Fort start` defaults to 41 and
-component order defaults to `xyz`. Preview reports the computed pivot and the
+For translation-only groups, `fort.*` files are copied byte-for-byte and are not
+rewritten. Only nonzero RX/RY/RZ triggers fort transformation. `Fort start`
+defaults to 41 and component order defaults to `xyz`. Preview reports the computed pivot and the
 maximum cycle drift. The pivot calculation is cached until the source surface,
 fort metadata, group membership, fort start, or component order changes.
 
@@ -106,16 +123,19 @@ validated before any output directory is created.
 
 1. copy the complete source case to a new directory;
 2. write the transformed `unstruc_surface_in.dat`;
-3. rotate each affected fort through a temporary file; and
-4. atomically replace that fort inside the new case.
+3. translate explicitly selected AMR block corners while preserving other AMR
+   columns and comments;
+4. rotate each affected fort through a temporary file; and
+5. atomically replace that fort inside the new case.
 
 The source case is never written. Existing output directories are never
 overwritten. If the batch fails, directories created by that operation are
 removed.
 
 Body order, node ids, element topology, and canonical counts do not change.
-Grid, AMR, solver input, and direct fluid-probe coordinates are copied without
-spatial changes, so verify their coverage after substantial transformations.
+Grid, solver input, and direct fluid-probe coordinates are copied without
+spatial changes. AMR remains unchanged unless its blocks are explicitly assigned
+to a translating group, so verify coverage after substantial transformations.
 
 Relevant regression coverage is in
 [`case_editor/test__batch_case_setup.py`](../test__batch_case_setup.py).
