@@ -34,7 +34,7 @@ from geometry.unstructure_surface.project import SurfaceProject  # noqa: E402
 from geometry.unstructure_surface.surface import SurfaceBody, read_surface, summarize_surface, validate_surface, write_surface  # noqa: E402
 from mesh.generation import generate_mesh  # noqa: E402
 from mesh.io import format_mesh_input, read_mesh, read_mesh_input, summarize_mesh, validate_mesh, write_mesh, write_mesh_input  # noqa: E402
-from motion.fort import fort_motion_info, resample_fort_motion, swap_fort_yz  # noqa: E402
+from motion.fort import fort_motion_info, resample_fort_motion, scale_fort_motion, swap_fort_yz  # noqa: E402
 from motion.project import MotionProject  # noqa: E402
 from motion.visualize import motion_envelope_frame_indices, motion_points_for_frames, sample_frame_indices  # noqa: E402
 
@@ -254,17 +254,7 @@ def _handle_post_api(path: str, payload: dict[str, object], default_case_dir: Pa
         out, bodies = SurfaceProject(case_dir).export_stl(output=output, body_ids=_payload_body_ids(payload))
         return {"ok": True, "path": str(out), "bodies": len(bodies)}
     if path == "/api/geometry/transform":
-        body_ids = _payload_body_ids(payload)
-        translate = _payload_vec3(payload, "translate")
-        rotation = _payload_vec3(payload, "rotation")
-        scale = payload.get("scale", 1.0)
-        out, bodies = SurfaceProject(case_dir).transform(
-            body_ids=body_ids,
-            translate=translate,
-            rotation=rotation,
-            scale=float(scale),
-        )
-        return {"ok": True, "path": str(out), "bodies": _json_ready(summarize_surface(bodies)), "report": _case_report(case_dir)}
+        return _transform_surface_payload(case_dir, payload)
     if path == "/api/geometry/metrics":
         return _geometry_metrics_payload(case_dir, payload)
     if path == "/api/geometry/swap-yz-fort":
@@ -764,6 +754,65 @@ def _format_amr_payload(payload: dict[str, object]) -> str:
 
 def _format_amr_number(value: float) -> str:
     return f"{float(value):.10g}"
+
+
+def _transform_surface_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    project = SurfaceProject(case_dir)
+    original = project.load(required=True)
+    body_ids = sorted(set(_payload_body_ids(payload) or range(1, len(original) + 1)))
+    if any(body_id < 1 or body_id > len(original) for body_id in body_ids):
+        raise ValueError(f"body_id must be in 1..{len(original)}")
+    scale = float(payload.get("scale", 1.0))
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("Scale must be finite and positive")
+    fort_start = int(payload.get("fort_start") or 41)
+    if fort_start <= 0:
+        raise ValueError("fort_start must be positive")
+    staged = []
+    scaled_forts = []
+    fort_errors = []
+    temp_forts = []
+    try:
+        if scale != 1.0:
+            for body_id in body_ids:
+                path = case_dir / f"fort.{fort_start + body_id - 1}"
+                try:
+                    if not path.exists():
+                        raise ValueError("File is missing")
+                    info = fort_motion_info(path)
+                    if info.node_count != original[body_id - 1].node_count:
+                        raise ValueError(f"Node count does not match body {body_id}")
+                    temp = _write_temp_upload(case_dir, b"", f"{path.name}.scale_", ".tmp")
+                    temp_forts.append(temp)
+                    scale_fort_motion(path, temp, scale)
+                    staged.append((temp, path))
+                except (ValueError, OSError) as exc:
+                    fort_errors.append(f"{path.name}: {exc}; fort scaling skipped")
+        temp = _write_temp_upload(case_dir, "", "surface_transform_", ".dat")
+        staged.append((temp, project.surface_path))
+        _, bodies = project.transform(
+            body_ids=body_ids, output=temp,
+            translate=_payload_vec3(payload, "translate"),
+            rotation=_payload_vec3(payload, "rotation"), scale=scale,
+        )
+        # Validate every output before replacing any active case file.
+        read_surface(temp)
+        temp.replace(project.surface_path)
+        for temp, path in staged[:-1]:
+            try:
+                temp.replace(path)
+                scaled_forts.append(path.name)
+            except OSError as exc:
+                fort_errors.append(f"{path.name}: {exc}; fort scaling skipped")
+    finally:
+        for temp, _ in staged:
+            temp.unlink(missing_ok=True)
+        for temp in temp_forts:
+            temp.unlink(missing_ok=True)
+    return {"ok": True, "path": str(project.surface_path),
+            "bodies": _json_ready(summarize_surface(bodies)),
+            "scaled_forts": scaled_forts, "fort_errors": fort_errors,
+            "report": _case_report(case_dir)}
 
 
 def _swap_yz_surface_fort_payload(case_dir: Path, payload: dict[str, object]) -> dict[str, object]:

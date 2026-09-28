@@ -315,6 +315,70 @@ def test_geometry_metrics_reports_surface_area_for_each_selected_body(tmp_path: 
     np.testing.assert_allclose([body["surface_area"] for body in result["bodies"]], [0.5, 2.0])
 
 
+def test_geometry_scale_preserves_integrated_motion(tmp_path: Path) -> None:
+    body = make_ellipse_2d(n=4)
+    surface = tmp_path / "unstruc_surface_in.dat"
+    write_surface(surface, [body, body])
+    raw = _fort_bytes(body.node_count, frames=3, vector=(1, -2, 3))
+    (tmp_path / "fort.41").write_bytes(raw)
+    (tmp_path / "fort.42").write_bytes(raw)
+    result = _handle_post_api("/api/geometry/transform", {
+        "body_ids": [2], "scale": 2.5, "translate": [4, 5, 6],
+    }, tmp_path)
+    bodies = read_surface(surface)
+    assert result["scaled_forts"] == ["fort.42"]
+    assert (tmp_path / "fort.41").read_bytes() == raw
+    np.testing.assert_allclose(bodies[0].points, body.points, atol=1e-14)
+    before, after = body.points.copy(), bodies[1].points.copy()
+    for frame in range(3):
+        header, velocity = read_frame(tmp_path / "fort.41", frame)
+        scaled_header, scaled_velocity = read_frame(tmp_path / "fort.42", frame)
+        assert header == scaled_header
+        before += velocity * header.dt
+        after += scaled_velocity * scaled_header.dt
+        np.testing.assert_allclose(after, before * 2.5 + [4, 5, 6])
+
+
+def test_geometry_scale_skips_invalid_fort_but_scales_models(tmp_path: Path) -> None:
+    body = make_ellipse_2d(n=4)
+    surface = tmp_path / "unstruc_surface_in.dat"
+    write_surface(surface, [body, body])
+    good = _fort_bytes(body.node_count, frames=3, vector=(1, 2, 3))
+    corrupt = bytearray(good)
+    frame_size = 28 + 32 * body.node_count
+    struct.pack_into("<i", corrupt, frame_size, 19)
+    for invalid in (_fort_bytes(body.node_count + 1), bytes(corrupt)):
+        write_surface(surface, [body, body])
+        (tmp_path / "fort.41").write_bytes(good)
+        (tmp_path / "fort.42").write_bytes(invalid)
+        result = _handle_post_api("/api/geometry/transform", {"scale": 2}, tmp_path)
+        assert result["ok"]
+        assert result["scaled_forts"] == ["fort.41"]
+        assert len(result["fort_errors"]) == 1
+        assert "fort.42" in result["fort_errors"][0]
+        for scaled_body in read_surface(surface):
+            np.testing.assert_allclose(scaled_body.points, body.points * 2, atol=1e-14)
+        _, velocity = read_frame(tmp_path / "fort.41", 0)
+        np.testing.assert_allclose(velocity[0], [2, 4, 6])
+        assert (tmp_path / "fort.42").read_bytes() == invalid
+        assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_geometry_scale_without_fort_and_translation_only(tmp_path: Path) -> None:
+    body = make_ellipse_2d(n=4)
+    surface = tmp_path / "unstruc_surface_in.dat"
+    write_surface(surface, [body])
+    result = _handle_post_api("/api/geometry/transform", {"scale": 2}, tmp_path)
+    assert result["ok"]
+    assert result["scaled_forts"] == []
+    assert "fort.41: File is missing" in result["fort_errors"][0]
+    np.testing.assert_allclose(read_surface(surface)[0].points, body.points * 2, atol=1e-14)
+    raw = _fort_bytes(body.node_count, vector=(1, 2, 3))
+    (tmp_path / "fort.41").write_bytes(raw)
+    _handle_post_api("/api/geometry/transform", {"translate": [1, 2, 3]}, tmp_path)
+    assert (tmp_path / "fort.41").read_bytes() == raw
+
+
 def test_swap_yz_surface_and_matching_fort_for_selected_body(tmp_path: Path) -> None:
     case_dir = tmp_path / "case"
     case_dir.mkdir()

@@ -1525,9 +1525,11 @@
     };
     try {
       await requireGeometryTransformApi();
-      await postJson("/api/geometry/transform", payload);
+      const result = await postJson("/api/geometry/transform", payload);
       await loadCase();
-      setStatus(`Transformed body ${ids.join(", ")}.`);
+      const errors = result.fort_errors || [];
+      const fortStatus = errors.length ? ` Fort errors: ${errors.join("; ")}. Model transform completed.` : "";
+      setStatus(`Transformed body ${ids.join(", ")}.${fortStatus}`);
     } catch (err) {
       setStatus(`Body transform failed: ${err.message || err}`);
     }

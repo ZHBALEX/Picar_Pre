@@ -121,6 +121,34 @@ def read_frame(
     return header, vectors
 
 
+def scale_fort_motion(input_path: str | Path, output_path: str | Path, scale: float) -> FortMotionInfo:
+    """Scale relative motion vectors, preserving all frame headers and node order."""
+    input_path, output_path = Path(input_path), Path(output_path)
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("Scale output must differ from input")
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("Scale must be finite and positive")
+    info = fort_motion_info(input_path)
+    with input_path.open("rb") as src, output_path.open("wb") as dst:
+        for frame_index in range(info.frame_count):
+            raw = src.read(FRAME_HEADER_BYTES)
+            start, _, _, nodes, end = HEADER_STRUCT.unpack(raw)
+            if start != HEADER_RECORD_BYTES or end != HEADER_RECORD_BYTES or nodes != info.node_count:
+                raise ValueError(f"Invalid header in {input_path} frame {frame_index}")
+            dst.write(raw)
+            remaining = nodes
+            while remaining:
+                count = min(65536, remaining)
+                records = np.fromfile(src, dtype=NODE_DTYPE, count=count)
+                if len(records) != count:
+                    raise ValueError(f"Incomplete frame {frame_index} in {input_path}")
+                _validate_node_markers(records, input_path, frame_index)
+                records["xyz"] *= scale
+                records.tofile(dst)
+                remaining -= count
+    return fort_motion_info(output_path)
+
+
 def rotate_fort_motion(
     input_path: str | Path,
     output_path: str | Path,
