@@ -37,6 +37,7 @@
     resetView: document.getElementById("resetView"),
     topView: document.getElementById("topView"),
     isoView: document.getElementById("isoView"),
+    upAxis: document.getElementById("upAxis"),
     xyView: document.getElementById("xyView"),
     xzView: document.getElementById("xzView"),
     yzView: document.getElementById("yzView"),
@@ -160,6 +161,7 @@
     angleX: 0.62,
     angleY: -0.78,
     viewMode: "iso",
+    upAxis: "z",
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -187,6 +189,11 @@
     el.resetView.addEventListener("click", resetView);
     el.topView.addEventListener("click", topView);
     el.isoView.addEventListener("click", isoView);
+    el.upAxis.addEventListener("change", () => {
+      state.upAxis = el.upAxis.value;
+      if (state.viewMode === "top") topView();
+      else isoView();
+    });
     el.xyView.addEventListener("click", () => planeView("xy"));
     el.xzView.addEventListener("click", () => planeView("xz"));
     el.yzView.addEventListener("click", () => planeView("yz"));
@@ -2259,6 +2266,7 @@
       },
       view: {
         mode: state.viewMode,
+        up_axis: state.upAxis,
         angle_x: state.angleX,
         angle_y: state.angleY,
         zoom: state.zoom,
@@ -2885,6 +2893,15 @@
   function drawFloorGrid(ctx, rect, box) {
     ctx.strokeStyle = "rgba(160, 166, 172, 0.26)";
     ctx.lineWidth = 0.7;
+    if (state.upAxis === "y") {
+      ticks(box.x0, box.x1).forEach((x) => linePoints(ctx, rect, [x, box.y0, box.z0], [x, box.y0, box.z1]));
+      ticks(box.z0, box.z1).forEach((z) => linePoints(ctx, rect, [box.x0, box.y0, z], [box.x1, box.y0, z]));
+      ticks(box.y0, box.y1).forEach((y) => {
+        linePoints(ctx, rect, [box.x0, y, box.z0], [box.x1, y, box.z0]);
+        linePoints(ctx, rect, [box.x0, y, box.z0], [box.x0, y, box.z1]);
+      });
+      return;
+    }
     ticks(box.x0, box.x1).forEach((x) => linePoints(ctx, rect, [x, box.y0, box.z0], [x, box.y1, box.z0]));
     ticks(box.y0, box.y1).forEach((y) => linePoints(ctx, rect, [box.x0, y, box.z0], [box.x1, y, box.z0]));
     ticks(box.z0, box.z1).forEach((z) => {
@@ -2992,13 +3009,13 @@
   function projectPoint(rect, x, y, z) {
     const b = state.bounds || { min: [-1, -1, -1], max: [1, 1, 1], span: 2 };
     return window.PicarViewportCore.projectPoint(rect, b, {
-      mode: state.viewMode, angleX: state.angleX, angleY: state.angleY,
+      mode: state.viewMode, angleX: state.angleX, angleY: state.angleY, upAxis: state.upAxis,
       zoom: state.zoom, panX: state.panX, panY: state.panY,
     }, x, y, z);
   }
 
   function cameraBasis() {
-    return window.PicarViewportCore.cameraBasis({ angleX: state.angleX, angleY: state.angleY });
+    return window.PicarViewportCore.cameraBasis({ angleX: state.angleX, angleY: state.angleY, upAxis: state.upAxis });
   }
 
   function dot3(a, b) {
@@ -3242,8 +3259,8 @@
 
   function topView() {
     state.viewMode = "top";
-    state.angleX = 1.55;
-    state.angleY = 0;
+    state.angleX = Math.PI / 2;
+    state.angleY = -Math.PI / 2;
     setActiveViewButton(el.topView);
     requestDraw();
   }

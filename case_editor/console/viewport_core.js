@@ -16,13 +16,12 @@
     const elevation = view.angleX;
     const azimuth = view.angleY;
     const cosElev = Math.cos(elevation);
-    if (Math.abs(cosElev) < 0.03) {
-      const topSign = elevation >= 0 ? 1 : -1;
-      return { right: [1, 0, 0], up: [0, topSign, 0], forward: [0, 0, -topSign] };
-    }
-    const camera = normalize3([cosElev * Math.cos(azimuth), cosElev * Math.sin(azimuth), Math.sin(elevation)]);
+    // Rotate the camera frame, never reflect or swap the model coordinates.
+    const toWorld = (v) => view.upAxis === "y" ? [v[0], v[2], -v[1]] : v;
+    const camera = toWorld([cosElev * Math.cos(azimuth), cosElev * Math.sin(azimuth), Math.sin(elevation)]);
     const forward = [-camera[0], -camera[1], -camera[2]];
-    const right = normalize3(cross3(forward, [0, 0, 1]));
+    // Analytic tangent stays continuous even at the top/bottom poles.
+    const right = toWorld([-Math.sin(azimuth), Math.cos(azimuth), 0]);
     return { right, up: normalize3(cross3(right, forward)), forward };
   }
 

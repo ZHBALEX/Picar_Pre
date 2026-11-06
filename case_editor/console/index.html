@@ -285,6 +285,11 @@
           <span id="subtitle">ready</span>
         </div>
         <div class="toolbar-actions">
+          <label for="upAxis">Height</label>
+          <select id="upAxis" title="Vertical axis for 3D rotation and Top view; model coordinates stay unchanged">
+            <option value="z">Z up</option>
+            <option value="y">Y up</option>
+          </select>
           <button id="resetView" type="button">Reset</button>
           <button id="topView" type="button">Top</button>
           <button id="isoView" class="active" type="button">ISO</button>
@@ -299,7 +304,7 @@
       </footer>
     </section>
   </main>
-  <script src="viewport_core.js?v=1"></script>
-  <script src="app.js?v=geometry-metrics3"></script>
+  <script src="viewport_core.js?v=2"></script>
+  <script src="app.js?v=up-axis2"></script>
 </body>
 </html>
